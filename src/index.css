@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+/* Стиль для подсветки возможных ходов */
+.square.possible-move::after {
+  content: "";
+  position: absolute;
+  top: 35%;
+  left: 35%;
+  width: 30%;
+  height: 30%;
+  background-color: rgba(16, 185, 129, 0.6); /* Зеленая точка */
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Подсветка полей при выборе фигуры */
+.cm-chessboard .marker-square {
+  fill: rgba(33, 150, 243, 0.4) !important;
+}
+
+/* Возможные ходы выбранной фигуры */
+.cm-chessboard .marker-dot {
+  fill: #16a34a !important;
+  opacity: 0.62 !important;
+}
+
+/* Возможное взятие: зелёное кольцо вокруг фигуры соперника */
+.cm-chessboard .marker-bevel {
+  fill: #16a34a !important;
+  opacity: 0.48 !important;
+}
+
+/* Зеленый круг Lichess для клика ПКМ */
+.cm-chessboard .marker-circle {
+  fill: none !important;
+  stroke: #15781b !important;
+  stroke-width: 4px !important;
+  opacity: 0.8 !important;
+}
+
+/* Линия стрелки Lichess */
+.cm-chessboard .arrow {
+  stroke: #15781b !important;
+  fill: #15781b !important;
+  opacity: 0.8 !important;
+  stroke-width: 6px !important;
+  stroke-linecap: round !important;
+}
+
+/* Наконечник стрелки Lichess */
+.cm-chessboard .arrow-head {
+  fill: #15781b !important;
+  stroke: #15781b !important;
+  opacity: 0.85 !important;
+}
