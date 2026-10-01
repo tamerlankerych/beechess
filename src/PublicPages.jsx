@@ -8,7 +8,7 @@ const INFO = {
   email: 'tamerkross@gmail.com',
   phone: '+7 777 068 33 67',
   instagram: 'https://www.instagram.com/beechess.academy/',
-  priceKzt: '115 000 ₸',
+  priceKzt: '110 000 ₸',
   workHours: 'ежедневно, 10:00–22:00 (UTC+5)',
 };
 
