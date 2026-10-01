@@ -20,7 +20,7 @@ export const LoginScreen = () => {
 
       if (authError) throw authError;
 
-      // Роль и активную вкладку определяет App.jsx через onAuthStateChange
+      // Role и активную вкладку определяет App.jsx через onAuthStateChange
       // (fetchUserRole). Дублировать запрос здесь не нужно — это убирает
       // гонку состояний между двумя источниками роли и лишний запрос к БД.
     } catch (err) {
@@ -41,7 +41,7 @@ export const LoginScreen = () => {
 
         {error && (
           <div className="mb-4 p-3 bg-red-50 text-red-600 text-xs rounded-lg">
-            Ошибка входа: {error}
+            Sign-in error: {error}
           </div>
         )}
 
@@ -59,7 +59,7 @@ export const LoginScreen = () => {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Пароль</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Password</label>
             <input
               type="password"
               value={password}
@@ -75,7 +75,7 @@ export const LoginScreen = () => {
             disabled={loading}
             className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-sm cursor-pointer disabled:opacity-50 transition"
           >
-            {loading ? 'Вход...' : 'Войти в систему'}
+            {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
       </div>

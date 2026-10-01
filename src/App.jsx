@@ -28,7 +28,7 @@ export default function App() {
   const fetchUserRole = useCallback(async (userId) => {
     setDbErrorDetails(null);
     try {
-      console.log('Запрос роли для userId:', userId);
+      console.log('Requesting role for userId:', userId);
       const { data, error } = await supabase
         .from('profiles')
         .select('role')
@@ -36,22 +36,22 @@ export default function App() {
         .single();
 
       if (error) {
-        console.error('Ошибка Supabase при запросе профиля:', error);
-        setDbErrorDetails(`Ошибка Supabase: ${error.message} (код: ${error.code})`);
+        console.error('Supabase profile query error:', error);
+        setDbErrorDetails(`Supabase error: ${error.message} (code: ${error.code})`);
         throw error;
       }
 
       if (!data) {
-        setDbErrorDetails(`В таблице profiles нет строки с id = ${userId}`);
-        throw new Error('Профиль не найден в базе');
+        setDbErrorDetails(`No row in profiles table with id = ${userId}`);
+        throw new Error('Profile not found in database');
       }
 
       const role = data?.role ? data.role.trim().toLowerCase() : null;
-      console.log('Получена роль из базы:', role);
+      console.log('Role received from database:', role);
 
       if (!role) {
-        setDbErrorDetails(`У пользователя id = ${userId} поле role пустое (NULL)`);
-        throw new Error('Поле role пустое');
+        setDbErrorDetails(`User id = ${userId} has an empty role field (NULL)`);
+        throw new Error('Role field is empty');
       }
 
       setUserRole(role);
@@ -84,14 +84,14 @@ export default function App() {
           ...(savedLesson || {}),
           id: userId,
           roomId: `room-${userId}`,
-          title: 'Ваш урок',
-          students: { id: userId, name: 'Ученик' },
+          title: 'Your Lesson',
+          students: { id: userId, name: 'Student' },
           fen: savedLesson?.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
         });
         setActiveTab('board');
       }
     } catch (err) {
-      console.error('Критическая ошибка определения роли:', err);
+      console.error('Critical role detection error:', err);
       setUserRole('error');
     }
   }, []);
@@ -166,7 +166,7 @@ export default function App() {
             ...(savedLesson || {}),
             id: student.id,
             roomId: `room-${student.id}`,
-            title: `Урок: ${student.name || student.email}`,
+            title: `Lesson: ${student.name || student.email}`,
             students: student,
             fen: savedLesson?.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
           });
@@ -176,7 +176,7 @@ export default function App() {
     };
 
     // Автоматически открывать комнату из URL разрешено только тренеру.
-    // Ученик всегда получает собственный урок, а администратор выбирает
+    // Student всегда получает собственный урок, а администратор выбирает
     // активный урок вручную в своей панели.
     if (session && userRole === 'teacher') {
       checkUrlParams();
@@ -196,7 +196,7 @@ export default function App() {
       ...(savedLesson || {}),
       id: student.id,
       roomId,
-      title: `Урок: ${student.name || student.email}`,
+      title: `Lesson: ${student.name || student.email}`,
       students: student,
       fen: savedLesson?.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
     });
@@ -225,7 +225,7 @@ export default function App() {
         }, { onConflict: 'lesson_id' });
 
       if (error && !stopped) {
-        console.error('Не удалось обновить присутствие тренера:', error);
+        console.error('Failed to update coach presence:', error);
       }
     };
 
@@ -241,7 +241,7 @@ export default function App() {
         .eq('lesson_id', lessonId)
         .eq('teacher_id', teacherId)
         .then(({ error }) => {
-          if (error) console.error('Не удалось закрыть присутствие тренера:', error);
+          if (error) console.error('Failed to close coach presence:', error);
         });
     };
   }, [activeLesson?.id, activeTab, session?.user?.id, userRole]);
@@ -257,7 +257,7 @@ export default function App() {
   };
 
   if (!session) {
-    // Роль, activeTab и всё остальное после входа полностью определяет
+    // Role, activeTab и всё остальное после входа полностью определяет
     // onAuthStateChange -> fetchUserRole ниже. Это единственный источник
     // истины, поэтому никакого отдельного колбэка от LoginScreen не нужно.
     return <LoginScreen />;
@@ -289,7 +289,7 @@ export default function App() {
                   activeTab === 'admin' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
-                ⚙️ Управление тренерами
+                ⚙️ Manage Coaches
               </button>
             )}
 
@@ -300,7 +300,7 @@ export default function App() {
                   activeTab === 'teacher-panel' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
-                🎓 Управление учениками
+                🎓 Manage Students
               </button>
             )}
 
@@ -312,7 +312,7 @@ export default function App() {
                     activeTab === 'board' ? 'bg-blue-600 text-white' : 'text-blue-600 hover:bg-blue-50'
                   }`}
                 >
-                  🐝 Класс: {activeLesson.students?.name || activeLesson.students?.email}
+                  🐝 Classroom: {activeLesson.students?.name || activeLesson.students?.email}
                 </button>
                 <button
                   onClick={() => {
@@ -321,7 +321,7 @@ export default function App() {
                     window.history.pushState({}, '', window.location.pathname);
                   }}
                   className="px-2 py-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 transition font-bold text-xs cursor-pointer border-l border-blue-100"
-                  title="Закрыть урок"
+                  title="Close lesson"
                 >
                   ✕
                 </button>
@@ -332,13 +332,13 @@ export default function App() {
           <div className="flex items-center gap-3">
             <span className="text-xs text-gray-500 hidden sm:inline">{session.user.email}</span>
             <span className="px-2.5 py-0.5 bg-slate-100 text-slate-700 text-[10px] font-bold rounded-full uppercase">
-              {userRole === 'loading' ? 'загрузка...' : userRole}
+              {userRole === 'loading' ? 'loading...' : userRole}
             </span>
             <button
               onClick={handleLogout}
               className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-600 font-medium cursor-pointer hover:bg-gray-100 transition"
             >
-              Выйти
+              Log Out
             </button>
           </div>
         </div>
@@ -369,29 +369,29 @@ export default function App() {
             <AdminDashboard onObserveRoom={handleOpenStudentRoom} />
           ) : (
             <div className="text-center py-20 text-gray-500 bg-white rounded-2xl shadow-sm border border-gray-200">
-              <p className="text-base font-medium mb-1">Нет активного урока</p>
-              <p className="text-xs text-gray-400">Ожидание подключения к уроку...</p>
+              <p className="text-base font-medium mb-1">No active lesson</p>
+              <p className="text-xs text-gray-400">Waiting to join a lesson...</p>
             </div>
           )
         )}
 
         {userRole === 'loading' && (
           <div className="text-center py-20 text-gray-500 bg-white rounded-2xl shadow-sm border border-gray-200">
-            <p className="text-base font-medium mb-1">Определение роли пользователя...</p>
+            <p className="text-base font-medium mb-1">Detecting user role...</p>
           </div>
         )}
 
         {userRole === 'error' && (
           <div className="text-center py-16 bg-white rounded-2xl shadow-sm border border-red-200 p-8 max-w-xl mx-auto mt-10">
-            <p className="text-lg font-bold text-red-600 mb-2">Ошибка определения роли из базы</p>
+            <p className="text-lg font-bold text-red-600 mb-2">Failed to detect user role</p>
             <p className="text-xs text-gray-600 mb-4 font-mono bg-red-50 p-3 rounded-lg border border-red-100 text-left">
-              {dbErrorDetails || 'Неизвестная ошибка запроса к таблице profiles'}
+              {dbErrorDetails || 'Unknown error querying the profiles table'}
             </p>
             <button 
               onClick={handleLogout}
               className="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-semibold hover:bg-slate-900 transition"
             >
-              Выйти и войти снова
+              Log Out and Sign In Again
             </button>
           </div>
         )}

@@ -17,18 +17,18 @@ const INITIAL_TREE = {
 };
 
 const PIECES_PALETTE = [
-  { piece: 'wK', name: 'Белый король', fenChar: 'K' },
-  { piece: 'wQ', name: 'Белый ферзь', fenChar: 'Q' },
-  { piece: 'wR', name: 'Белая ладья', fenChar: 'R' },
-  { piece: 'wB', name: 'Белый слон', fenChar: 'B' },
-  { piece: 'wN', name: 'Белый конь', fenChar: 'N' },
-  { piece: 'wP', name: 'Белая пешка', fenChar: 'P' },
-  { piece: 'bK', name: 'Черный король', fenChar: 'k' },
-  { piece: 'bQ', name: 'Черный ферзь', fenChar: 'q' },
-  { piece: 'bR', name: 'Черная ладья', fenChar: 'r' },
-  { piece: 'bB', name: 'Черный слон', fenChar: 'b' },
-  { piece: 'bN', name: 'Черный конь', fenChar: 'n' },
-  { piece: 'bP', name: 'Черная пешка', fenChar: 'p' },
+  { piece: 'wK', name: 'White King', fenChar: 'K' },
+  { piece: 'wQ', name: 'White Queen', fenChar: 'Q' },
+  { piece: 'wR', name: 'White Rook', fenChar: 'R' },
+  { piece: 'wB', name: 'White Bishop', fenChar: 'B' },
+  { piece: 'wN', name: 'White Knight', fenChar: 'N' },
+  { piece: 'wP', name: 'White Pawn', fenChar: 'P' },
+  { piece: 'bK', name: 'Black King', fenChar: 'k' },
+  { piece: 'bQ', name: 'Black Queen', fenChar: 'q' },
+  { piece: 'bR', name: 'Black Rook', fenChar: 'r' },
+  { piece: 'bB', name: 'Black Bishop', fenChar: 'b' },
+  { piece: 'bN', name: 'Black Knight', fenChar: 'n' },
+  { piece: 'bP', name: 'Black Pawn', fenChar: 'p' },
 ];
 
 const playSound = (type) => {
@@ -208,7 +208,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     try {
       const lessonState = {
         id: lesson.id,
-        title: lesson.title || 'Урок',
+        title: lesson.title || 'Lesson',
         fen,
         can_student_move: studentCanMove,
         timer_w: Math.round(timerWRef.current),
@@ -228,7 +228,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
       if (error) throw error;
     } catch (e) {
-      console.error('Ошибка сохранения состояния:', e);
+      console.error('State save error:', e);
     }
   }, [lesson]);
 
@@ -420,8 +420,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       });
       channelRef.current?.send({ type: 'broadcast', event: 'clear_drawings', payload: {} });
     } catch (error) {
-      console.error('Не удалось открыть учебную позицию:', error);
-      window.alert('Эта позиция повреждена и не может быть открыта.');
+      console.error('Failed to open training position:', error);
+      window.alert('This position is corrupted and cannot be opened.');
     }
   };
 
@@ -451,7 +451,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         }
       });
     } catch (err) {
-      console.error("Ошибка FEN:", err);
+      console.error("FEN error:", err);
     }
   }, [saveState]);
 
@@ -754,7 +754,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         return true;
       });
     } catch (err) {
-      console.error('Ошибка инициализации cm-chessboard:', err);
+      console.error('cm-chessboard initialization error:', err);
     }
 
     let channelCancelled = false;
@@ -916,12 +916,12 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         if (channelCancelled) return;
         channel.subscribe((status, error) => {
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-            console.error('Ошибка защищённого Realtime-канала:', status, error);
+            console.error('Secure Realtime channel error:', status, error);
           }
         });
       })
       .catch((error) => {
-        console.error('Не удалось авторизовать Realtime-соединение:', error);
+        console.error('Failed to authorize Realtime connection:', error);
       });
 
     return () => {
@@ -954,7 +954,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       setTempEditorFen(fullUpdatedFen);
       chessboardInstance.current?.setPosition(fullUpdatedFen, false);
     } catch (err) {
-      console.error('Ошибка изменения поля редактора:', err);
+      console.error('Editor square update error:', err);
     }
   };
 
@@ -992,7 +992,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         chessboardInstance.current.setPosition(fullFen, false);
       }
     } catch (e) {
-      console.error("Ошибка настроек позиции:", e);
+      console.error("Position settings error:", e);
     }
   };
 
@@ -1055,7 +1055,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         channelRef.current.send({ type: 'broadcast', event: 'clear_drawings', payload: {} });
       }
     } catch (err) {
-      console.error("Ошибка сохранения позиции:", err);
+      console.error("Position save error:", err);
     }
   };
 
@@ -1227,7 +1227,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       gameRef.current.load(nextCurrentNode.fen, { skipValidation: true });
       chessboardInstance.current?.setPosition(nextCurrentNode.fen, true);
     } catch (error) {
-      console.error('Ошибка перехода после удаления хода:', error);
+      console.error('Navigation error after deleting move:', error);
     }
 
     saveState(nextCurrentNode.fen, canStudentMoveRef.current, {
@@ -1249,7 +1249,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   const renderMoveNotation = () => {
     const rootNode = tree.root;
     if (!rootNode || !rootNode.children?.length) {
-      return <div className="p-4 text-center text-xs text-gray-400 font-sans">Ходов пока нет</div>;
+      return <div className="p-4 text-center text-xs text-gray-400 font-sans">No moves yet</div>;
     }
 
     const rootFenParts = (rootNode.fen || '').split(' ');
@@ -1277,7 +1277,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           key={node.id}
           onClick={() => jumpToNode(node.id)}
           onContextMenu={(event) => deleteMoveBranch(node.id, event)}
-          title="ПКМ — удалить этот ход и продолжение"
+          title="Right-click — delete this move and continuation"
           className={`${className} cursor-pointer`}
         >
           {content}
@@ -1335,7 +1335,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     );
   };
 
-  if (!lesson) return <div className="p-8 text-center text-gray-500">Урок не выбран</div>;
+  if (!lesson) return <div className="p-8 text-center text-gray-500">No lesson selected</div>;
 
   return (
     <div className="min-h-[calc(100vh-7rem)] bg-slate-100">
@@ -1348,14 +1348,14 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       {pendingPromotion && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/45 p-4">
           <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl">
-            <h3 className="text-center text-base font-extrabold text-slate-900">Выберите фигуру</h3>
-            <p className="mt-1 text-center text-xs text-slate-500">Превращение пешки</p>
+            <h3 className="text-center text-base font-extrabold text-slate-900">Choose a Piece</h3>
+            <p className="mt-1 text-center text-xs text-slate-500">Pawn Promotion</p>
             <div className="mt-4 grid grid-cols-4 gap-2">
               {[
-                { type: 'q', white: '♕', black: '♛', label: 'Ферзь' },
-                { type: 'r', white: '♖', black: '♜', label: 'Ладья' },
-                { type: 'b', white: '♗', black: '♝', label: 'Слон' },
-                { type: 'n', white: '♘', black: '♞', label: 'Конь' }
+                { type: 'q', white: '♕', black: '♛', label: 'Queen' },
+                { type: 'r', white: '♖', black: '♜', label: 'Rook' },
+                { type: 'b', white: '♗', black: '♝', label: 'Bishop' },
+                { type: 'n', white: '♘', black: '♞', label: 'Knight' }
               ].map((piece) => (
                 <button
                   key={piece.type}
@@ -1373,7 +1373,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
               onClick={() => setPendingPromotion(null)}
               className="mt-3 w-full rounded-xl bg-slate-100 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-200 cursor-pointer"
             >
-              Отмена
+              Cancel
             </button>
           </div>
         </div>
@@ -1387,12 +1387,12 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                 <div className="flex items-center gap-2">
                   <span className="text-lg font-black tracking-tight text-slate-900">bee<span className="text-amber-500">chess</span></span>
                   <span className="text-gray-300">/</span>
-                  <h2 className="text-sm font-bold text-gray-800 truncate">{lesson.title || 'Урок шахмат'}</h2>
+                  <h2 className="text-sm font-bold text-gray-800 truncate">{lesson.title || 'Chess Lesson'}</h2>
                 </div>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className={`w-2 h-2 rounded-full ${canStudentMove ? 'bg-emerald-500' : 'bg-slate-400'}`} />
                 <span className="text-[11px] text-gray-500">
-                    {isObserver ? 'Режим наблюдения — управление отключено' : canStudentMove ? 'Ученик может ходить' : 'Ход ученика заблокирован'}
+                    {isObserver ? 'Observer mode — controls disabled' : canStudentMove ? 'Student can move' : 'Student moves are locked'}
                 </span>
                 </div>
               </div>
@@ -1405,13 +1405,13 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                     onClick={() => setIsMaterialsOpen(true)}
                     className="px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-xs font-bold transition cursor-pointer"
                   >
-                    📚 Материалы
+                    📚 Materials
                   </button>
                   <button
                     onClick={toggleStudentAccess}
                     className={`px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${canStudentMove ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
                   >
-                    {canStudentMove ? '🔒 Заблокировать' : '🟢 Дать ход'}
+                    {canStudentMove ? '🔒 Lock Moves' : '🟢 Allow Moves'}
                   </button>
                 </>
               )}
@@ -1420,7 +1420,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                   onClick={copyInviteLink}
                   className="px-3 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-xs font-semibold text-gray-700 cursor-pointer"
                 >
-                  {copied ? '✓ Скопировано' : '🔗 Ссылка'}
+                  {copied ? '✓ Copied' : '🔗 Link'}
                 </button>
               )}
             </div>
@@ -1431,7 +1431,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
               <div className="flex w-full max-w-[660px] items-center justify-between gap-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2">
                 <div className="min-w-0">
                   <p className="truncate text-xs font-bold text-blue-900">📘 {loadedMaterial.topic}</p>
-                  <p className="text-[10px] text-blue-600">Позиция {loadedMaterial.position_order} · {loadedMaterial.module}</p>
+                  <p className="text-[10px] text-blue-600">Position {loadedMaterial.position_order} · {loadedMaterial.module}</p>
                 </div>
                 <button type="button" onClick={() => setLoadedMaterial(null)} className="shrink-0 text-xs font-bold text-blue-500 hover:text-blue-700 cursor-pointer">✕</button>
               </div>
@@ -1464,16 +1464,16 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                   }}
                   className={`py-2 rounded-xl text-xs font-bold cursor-pointer ${isEditorMode ? 'bg-blue-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
                 >
-                  ⚙️ Редактор позиции
+                  ⚙️ Position Editor
                 </button>
                 <button
                   onClick={toggleBoardOrientation}
                   className="py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
                 >
-                  🔄 Перевернуть доску
+                  🔄 Flip Board
                 </button>
                 <div className="hidden sm:flex items-center justify-center rounded-xl bg-amber-50 text-amber-800 text-[11px] font-medium px-2">
-                  ПКМ: кружки и стрелки
+                  Right-click: circles and arrows
                 </div>
               </div>
             )}
@@ -1482,12 +1482,12 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         {isTeacher && isEditorMode && (
           <div className="w-full bg-blue-50/90 border border-blue-200 p-4 rounded-2xl shadow-sm flex flex-col gap-3">
             <div className="flex justify-between items-center text-xs font-bold text-blue-900">
-              <span>⚙️ Редактор позиции (Свободный Drag & Drop)</span>
-              <button onClick={() => setIsEditorMode(false)} className="text-red-600 hover:underline cursor-pointer">Отмена</button>
+              <span>⚙️ Position Editor (Free Drag & Drop)</span>
+              <button onClick={() => setIsEditorMode(false)} className="text-red-600 hover:underline cursor-pointer">Cancel</button>
             </div>
 
             <div className="text-[11px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-medium text-center">
-              Перетаскивайте фигуры мышкой, ставьте кликом из палитры или удаляйте через **Ctrl + ПКМ**.
+              Drag pieces with the mouse, place them by clicking the palette, or remove them with **Ctrl + right-click**.
             </div>
 
             <div className="grid grid-cols-6 gap-1">
@@ -1502,7 +1502,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                     setSelectedEditorPiece(item.piece);
                   }}
                   onClick={() => setSelectedEditorPiece(item.piece)}
-                  title={`${item.name}: перетащите на доску или выберите кликом`}
+                  title={`${item.name}: drag onto the board or select with a click`}
                   className={`flex aspect-square items-center justify-center rounded border bg-white p-0.5 cursor-grab active:cursor-grabbing hover:bg-gray-100 ${selectedEditorPiece === item.piece ? 'border-blue-600 ring-2 ring-blue-400' : 'border-gray-200'}`}
                 >
                   <ChessPieceIcon piece={item.piece} className="h-[82%] w-[82%]" />
@@ -1512,7 +1512,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
             <div className="flex flex-col gap-1.5 bg-white p-2 rounded-lg border border-blue-100 text-[11px]">
               <div className="flex items-center justify-between">
-                <span className="font-semibold text-gray-700">Чей ход:</span>
+                <span className="font-semibold text-gray-700">Side to move:</span>
                 <select
                   value={editorTurn}
                   onChange={(e) => {
@@ -1522,19 +1522,19 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                   }}
                   className="border border-gray-300 rounded px-1.5 py-0.5 bg-white font-medium cursor-pointer"
                 >
-                  <option value="w">Белые</option>
-                  <option value="b">Черные</option>
+                  <option value="w">White</option>
+                  <option value="b">Black</option>
                 </select>
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="font-semibold text-gray-700">Права на рокировку:</span>
+                <span className="font-semibold text-gray-700">Castling rights:</span>
                 <div className="flex flex-wrap gap-2.5">
                   {[
-                    { label: 'Белые O-O (K)', char: 'K' },
-                    { label: 'Белые O-O-O (Q)', char: 'Q' },
-                    { label: 'Черные o-o (k)', char: 'k' },
-                    { label: 'Черные o-o-o (q)', char: 'q' }
+                    { label: 'White O-O (K)', char: 'K' },
+                    { label: 'White O-O-O (Q)', char: 'Q' },
+                    { label: 'Black O-O (k)', char: 'k' },
+                    { label: 'Black O-O-O (q)', char: 'q' }
                   ].map(({ label, char }) => {
                     const isChecked = editorCastling.includes(char);
                     return (
@@ -1567,13 +1567,13 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                 onClick={() => setSelectedEditorPiece(null)}
                 className={`flex-1 py-1 text-[11px] font-semibold rounded border cursor-pointer ${selectedEditorPiece === null ? 'bg-red-600 text-white border-red-600' : 'bg-white text-red-600 border-gray-200'}`}
               >
-                🗑️ Ластик (или Ctrl + ПКМ)
+                🗑️ Eraser (or Ctrl + right-click)
               </button>
               <button onClick={handleClearBoard} className="px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-700 hover:bg-gray-100 cursor-pointer">
-                Очистить
+                Clear Board
               </button>
               <button onClick={handleResetEditor} className="px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-700 hover:bg-gray-100 cursor-pointer">
-                Начальная
+                Starting Position
               </button>
             </div>
 
@@ -1581,7 +1581,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
               onClick={handleSaveEditorPosition}
               className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition shadow-sm cursor-pointer"
             >
-              💾 Сохранить позицию (применить и начать запись ходов)
+              💾 Save Position (apply and start recording moves)
             </button>
           </div>
         )}
@@ -1590,8 +1590,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
         <section className="bg-white p-3 rounded-2xl border border-gray-200 shadow-sm flex flex-col h-[420px] xl:h-[calc(100vh-7rem)] xl:max-h-[760px] xl:min-h-[520px] font-mono select-none xl:sticky xl:top-20 min-w-0">
           <div className="flex justify-between items-center mb-2 px-1 gap-2">
-            <h3 className="font-bold text-gray-900 text-sm font-sans whitespace-nowrap">📋 Запись партии</h3>
-            {isTeacher && <span className="text-[9px] text-gray-400 font-sans text-right">← → переход<br />ПКМ — удалить</span>}
+            <h3 className="font-bold text-gray-900 text-sm font-sans whitespace-nowrap">📋 Move List</h3>
+            {isTeacher && <span className="text-[9px] text-gray-400 font-sans text-right">← → navigate<br />Right-click — delete</span>}
           </div>
           <div className="flex-1 overflow-y-auto border border-gray-100 rounded-xl bg-white">
             {renderMoveNotation()}
@@ -1603,14 +1603,14 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                 disabled={!tree[currentId]?.parentId}
                 className="py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-lg text-xs font-bold cursor-pointer font-sans"
               >
-                ‹ Назад
+                ‹ Back
               </button>
               <button
                 onClick={() => tree[currentId]?.children?.[0] && jumpToNode(tree[currentId].children[0])}
                 disabled={!tree[currentId]?.children?.length}
                 className="py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-lg text-xs font-bold cursor-pointer font-sans"
               >
-                Вперёд ›
+                Forward ›
               </button>
             </div>
           )}
@@ -1620,11 +1620,11 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           <div className="bg-white p-3 rounded-2xl border border-gray-200 shadow-sm">
             <div className="flex justify-between items-center px-1 mb-2">
               <div>
-                <h3 className="font-bold text-gray-900 text-sm">📹 Видеоурок</h3>
-                <p className="text-[10px] text-gray-400">Защищённая комната beeChess</p>
+                <h3 className="font-bold text-gray-900 text-sm">📹 Video Lesson</h3>
+                <p className="text-[10px] text-gray-400">Secure beeChess room</p>
               </div>
               <button onClick={() => setIsVideoOpen(!isVideoOpen)} className="text-xs text-blue-600 font-semibold cursor-pointer">
-                {isVideoOpen ? 'Свернуть' : 'Развернуть'}
+                {isVideoOpen ? 'Collapse' : 'Expand'}
               </button>
             </div>
             {isVideoOpen ? (
@@ -1632,18 +1632,18 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                 <VideoRoom lesson={lesson} isObserver={isObserver} />
               </div>
             ) : (
-              <div className="h-20 flex items-center justify-center bg-slate-50 rounded-xl text-xs text-gray-500">Видео свёрнуто</div>
+              <div className="h-20 flex items-center justify-center bg-slate-50 rounded-xl text-xs text-gray-500">Video collapsed</div>
             )}
           </div>
 
           <div className="bg-white p-3 rounded-2xl border border-gray-200 shadow-sm font-mono select-none">
             <div className="grid grid-cols-2 gap-2">
               <div className={`px-3 py-2.5 rounded-xl transition-all ${activeColor === 'w' && clockStarted ? 'bg-amber-50 text-gray-900 ring-2 ring-amber-400' : 'bg-slate-100 text-gray-700'}`}>
-                <div className="text-[10px] font-sans font-bold text-gray-500 mb-0.5">⬜ БЕЛЫЕ</div>
+                <div className="text-[10px] font-sans font-bold text-gray-500 mb-0.5">⬜ WHITE</div>
                 <span ref={whiteClockDomRef} className="text-xl font-black tracking-wider">{formatTime(timerW)}</span>
               </div>
               <div className={`px-3 py-2.5 rounded-xl transition-all ${activeColor === 'b' && clockStarted ? 'bg-slate-900 text-white ring-2 ring-amber-400' : 'bg-slate-100 text-gray-700'}`}>
-                <div className={`text-[10px] font-sans font-bold mb-0.5 ${activeColor === 'b' && clockStarted ? 'text-gray-300' : 'text-gray-500'}`}>⬛ ЧЕРНЫЕ</div>
+                <div className={`text-[10px] font-sans font-bold mb-0.5 ${activeColor === 'b' && clockStarted ? 'text-gray-300' : 'text-gray-500'}`}>⬛ BLACK</div>
                 <span ref={blackClockDomRef} className="text-xl font-black tracking-wider">{formatTime(timerB)}</span>
               </div>
             </div>
@@ -1657,7 +1657,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                   onClick={toggleClockStart}
                   className={`py-1.5 rounded-lg font-bold text-white cursor-pointer ${clockStarted ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
                 >
-                  {clockStarted ? 'Стоп' : 'Старт'}
+                  {clockStarted ? 'Stop' : 'Start'}
                 </button>
               </div>
             )}

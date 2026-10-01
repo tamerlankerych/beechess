@@ -23,7 +23,7 @@ export const AdminDashboard = ({ onObserveRoom }) => {
       if (error) throw error;
       setUsers(data || []);
     } catch (err) {
-      console.error('Ошибка загрузки пользователей:', err);
+      console.error('Failed to load users:', err);
     } finally {
       setFetchingUsers(false);
     }
@@ -61,7 +61,7 @@ export const AdminDashboard = ({ onObserveRoom }) => {
         teacher: profileById[item.teacher_id]
       })).filter((item) => item.student));
     } catch (err) {
-      console.error('Ошибка загрузки текущих уроков:', err);
+      console.error('Failed to load active lessons:', err);
       setActiveLessons([]);
     } finally {
       setFetchingLessons(false);
@@ -94,7 +94,7 @@ export const AdminDashboard = ({ onObserveRoom }) => {
 
       if (rpcError) throw rpcError;
 
-      setMessage(`Тренер успешно создан! Email: ${email}, Пароль: beechess123`);
+      setMessage(`Coach created successfully! Email: ${email}, Password: beechess123`);
       setEmail('');
       fetchUsers(); // Обновляем список пользователей
     } catch (err) {
@@ -106,7 +106,7 @@ export const AdminDashboard = ({ onObserveRoom }) => {
 
   // Функция полного удаления пользователя через RPC-функцию в базе данных
   const handleDeleteUser = async (userId, userEmail) => {
-    if (!window.confirm(`Вы уверены, что хотите полностью удалить пользователя ${userEmail}?`)) {
+    if (!window.confirm(`Are you sure you want to permanently delete user ${userEmail}?`)) {
       return;
     }
 
@@ -122,10 +122,10 @@ export const AdminDashboard = ({ onObserveRoom }) => {
 
       // Обновляем локальный стейт списка пользователей, чтобы строка сразу исчезла
       setUsers(users.filter((u) => u.id !== userId));
-      setMessage(`Пользователь ${userEmail} успешно удален из системы.`);
+      setMessage(`User ${userEmail} was successfully removed from the system.`);
     } catch (err) {
-      console.error('Ошибка при удалении пользователя:', err);
-      setError('Не удалось удалить пользователя: ' + err.message);
+      console.error('Error deleting user:', err);
+      setError('Failed to delete user: ' + err.message);
     }
   };
 
@@ -134,23 +134,23 @@ export const AdminDashboard = ({ onObserveRoom }) => {
       <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
         <div className="flex items-center justify-between gap-3 mb-4">
           <div>
-            <h3 className="text-lg font-bold text-gray-900">🟢 Текущие уроки</h3>
-            <p className="text-xs text-gray-400 mt-1">Режим наблюдения не позволяет менять доску или управлять уроком</p>
+            <h3 className="text-lg font-bold text-gray-900">🟢 Active Lessons</h3>
+            <p className="text-xs text-gray-400 mt-1">Observer mode does not allow board changes or lesson controls</p>
           </div>
           <button
             type="button"
             onClick={fetchActiveLessons}
             className="text-xs text-blue-600 hover:underline cursor-pointer font-medium"
           >
-            Обновить
+            Refresh
           </button>
         </div>
 
         {fetchingLessons ? (
-          <div className="text-xs text-gray-400 py-5 text-center">Проверяем активные комнаты...</div>
+          <div className="text-xs text-gray-400 py-5 text-center">Checking active rooms...</div>
         ) : activeLessons.length === 0 ? (
           <div className="rounded-xl bg-slate-50 py-6 text-center text-xs text-gray-500">
-            Сейчас активных уроков нет
+            No active lessons right now
           </div>
         ) : (
           <div className="space-y-2">
@@ -158,16 +158,16 @@ export const AdminDashboard = ({ onObserveRoom }) => {
               <div key={item.lesson_id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-emerald-100 bg-emerald-50/50 px-4 py-3">
                 <div className="min-w-0">
                   <p className="text-sm font-bold text-gray-900 truncate">
-                    {item.teacher?.name || item.teacher?.email || 'Тренер'} → {item.student?.name || item.student?.email || 'Ученик'}
+                    {item.teacher?.name || item.teacher?.email || 'Coach'} → {item.student?.name || item.student?.email || 'Student'}
                   </p>
-                  <p className="text-[11px] text-emerald-700 mt-0.5">Урок идёт сейчас</p>
+                  <p className="text-[11px] text-emerald-700 mt-0.5">Lesson in progress</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => onObserveRoom?.(item.student)}
                   className="shrink-0 rounded-lg bg-purple-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-purple-700 cursor-pointer"
                 >
-                  👁 Наблюдать
+                  👁 Observe
                 </button>
               </div>
             ))}
@@ -177,14 +177,14 @@ export const AdminDashboard = ({ onObserveRoom }) => {
 
       {/* Форма добавления тренера */}
       <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-        <h3 className="text-lg font-bold text-gray-900 mb-4">Панель Администратора: Добавить тренера</h3>
+        <h3 className="text-lg font-bold text-gray-900 mb-4">Admin Panel: Add Coach</h3>
 
         {message && <div className="mb-4 p-3 bg-green-50 text-green-700 text-xs rounded-lg">{message}</div>}
         {error && <div className="mb-4 p-3 bg-red-50 text-red-600 text-xs rounded-lg">{error}</div>}
 
         <form onSubmit={handleCreateTeacher} className="flex gap-4 items-end">
           <div className="flex-1">
-            <label className="block text-xs font-medium text-gray-700 mb-1">Email тренера</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Coach email</label>
             <input
               type="email"
               value={email}
@@ -194,7 +194,7 @@ export const AdminDashboard = ({ onObserveRoom }) => {
               required
             />
             <p className="text-[10px] text-gray-400 mt-1">
-              Пароль по умолчанию: <span className="font-semibold text-gray-600">beechess123</span>
+              Default password: <span className="font-semibold text-gray-600">beechess123</span>
             </p>
           </div>
 
@@ -203,7 +203,7 @@ export const AdminDashboard = ({ onObserveRoom }) => {
             disabled={loading}
             className="py-2 px-5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-sm cursor-pointer disabled:opacity-50 h-[38px]"
           >
-            {loading ? 'Создание...' : 'Добавить тренера'}
+            {loading ? 'Creating...' : 'Add Coach'}
           </button>
         </form>
       </div>
@@ -211,28 +211,28 @@ export const AdminDashboard = ({ onObserveRoom }) => {
       {/* Список зарегистрированных пользователей */}
       <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-bold text-gray-900">Список пользователей в системе</h3>
+          <h3 className="text-lg font-bold text-gray-900">System Users</h3>
           <button 
             onClick={fetchUsers}
             className="text-xs text-blue-600 hover:underline cursor-pointer font-medium"
           >
-            Обновить список
+            Refresh List
           </button>
         </div>
 
         {fetchingUsers ? (
-          <div className="text-xs text-gray-400 py-4 text-center">Загрузка пользователей...</div>
+          <div className="text-xs text-gray-400 py-4 text-center">Loading users...</div>
         ) : users.length === 0 ? (
-          <div className="text-xs text-gray-400 py-4 text-center">Пользователей пока нет</div>
+          <div className="text-xs text-gray-400 py-4 text-center">No users yet</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="border-b border-gray-100 text-gray-400">
                   <th className="py-2.5 px-3 font-medium">Email</th>
-                  <th className="py-2.5 px-3 font-medium">Роль</th>
-                  <th className="py-2.5 px-3 font-medium">Дата создания</th>
-                  <th className="py-2.5 px-3 font-medium text-right">Действия</th>
+                  <th className="py-2.5 px-3 font-medium">Role</th>
+                  <th className="py-2.5 px-3 font-medium">Created</th>
+                  <th className="py-2.5 px-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 text-gray-700">
@@ -257,7 +257,7 @@ export const AdminDashboard = ({ onObserveRoom }) => {
                           onClick={() => handleDeleteUser(u.id, u.email)}
                           className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 font-medium rounded transition cursor-pointer"
                         >
-                          Удалить
+                          Delete
                         </button>
                       )}
                     </td>

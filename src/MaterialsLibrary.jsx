@@ -153,25 +153,25 @@ export const MaterialsLibrary = ({ onClose, onOpenPosition }) => {
       >
         <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3 sm:px-5">
           <div>
-            <h2 className="text-lg font-black text-slate-900">📚 Материалы beeChess</h2>
-            <p className="text-xs text-slate-500">Выберите тему и отправьте позицию на доску урока</p>
+            <h2 className="text-lg font-black text-slate-900">📚 beeChess Materials</h2>
+            <p className="text-xs text-slate-500">Choose a topic and send a position to the lesson board</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-200 cursor-pointer">
-            ✕ Закрыть
+            ✕ Close
           </button>
         </div>
 
         {loading ? (
-          <div className="flex flex-1 items-center justify-center text-sm font-semibold text-slate-500">Загружаем материалы…</div>
+          <div className="flex flex-1 items-center justify-center text-sm font-semibold text-slate-500">Loading materials…</div>
         ) : error ? (
           <div className="m-auto max-w-lg rounded-2xl border border-red-200 bg-red-50 p-5 text-center">
-            <p className="font-bold text-red-700">Не удалось загрузить материалы</p>
+            <p className="font-bold text-red-700">Failed to load materials</p>
             <p className="mt-1 text-xs text-red-600">{error}</p>
           </div>
         ) : (
           <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[230px_280px_minmax(0,1fr)]">
             <aside className="min-h-0 overflow-y-auto border-b border-slate-200 bg-white p-3 lg:border-b-0 lg:border-r">
-              <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-400">Модуль</label>
+              <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-400">Module</label>
               <select
                 value={activeModule}
                 onChange={(event) => {
@@ -184,7 +184,7 @@ export const MaterialsLibrary = ({ onClose, onOpenPosition }) => {
                 {modules.map((module) => <option key={module} value={module}>{module}</option>)}
               </select>
 
-              <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">Разделы</p>
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">Sections</p>
               <div className="flex gap-2 overflow-x-auto lg:flex-col">
                 {sections.map((section) => (
                   <button
@@ -206,7 +206,7 @@ export const MaterialsLibrary = ({ onClose, onOpenPosition }) => {
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Найти тему…"
+                placeholder="Search topics…"
                 className="mb-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-400"
               />
               <div className="flex gap-2 overflow-x-auto lg:flex-col">
@@ -217,22 +217,22 @@ export const MaterialsLibrary = ({ onClose, onOpenPosition }) => {
                     onClick={() => setSelectedTopicNumber(topic.topic_number)}
                     className={`min-w-[210px] rounded-xl border p-2.5 text-left transition cursor-pointer lg:min-w-0 ${activeTopicNumber === topic.topic_number ? 'border-blue-300 bg-blue-50 ring-1 ring-blue-200' : 'border-slate-200 bg-white hover:border-slate-300'}`}
                   >
-                    <span className="block text-[10px] font-bold text-slate-400">ТЕМА {topic.topic_number}</span>
+                    <span className="block text-[10px] font-bold text-slate-400">TOPIC {topic.topic_number}</span>
                     <span className="mt-0.5 block text-xs font-bold text-slate-800">{topic.topic}</span>
-                    <span className="mt-1 block text-[10px] text-slate-400">{topic.count} позиций</span>
+                    <span className="mt-1 block text-[10px] text-slate-400">{topic.count} positions</span>
                   </button>
                 ))}
               </div>
-              {topics.length === 0 && <p className="py-8 text-center text-xs text-slate-400">Темы не найдены</p>}
+              {topics.length === 0 && <p className="py-8 text-center text-xs text-slate-400">No topics found</p>}
             </aside>
 
             <main className="min-h-0 overflow-y-auto p-3 sm:p-4">
               <div className="mb-3 flex items-end justify-between gap-3">
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600">Тема {activeTopicNumber}</p>
-                  <h3 className="text-base font-black text-slate-900">{activeTopic?.topic || 'Выберите тему'}</h3>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600">Topic {activeTopicNumber}</p>
+                  <h3 className="text-base font-black text-slate-900">{activeTopic?.topic || 'Choose a topic'}</h3>
                 </div>
-                <span className="text-xs font-semibold text-slate-400">{positions.length} позиций</span>
+                <span className="text-xs font-semibold text-slate-400">{positions.length} positions</span>
               </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -243,9 +243,9 @@ export const MaterialsLibrary = ({ onClose, onOpenPosition }) => {
                       <PositionPreview fen={position.setup_fen} />
                       <div className="mt-2 flex items-center justify-between gap-2">
                         <div>
-                          <p className="text-xs font-black text-slate-800">Позиция {position.position_order}</p>
+                          <p className="text-xs font-black text-slate-800">Position {position.position_order}</p>
                           <p className="text-[10px] text-slate-400">
-                            Ход: {position.side_to_move === 'white' ? 'белых' : 'чёрных'}
+                            Move: {position.side_to_move === 'white' ? 'White' : 'Black'}
                             {position.rating ? ` · ${position.rating}` : ''}
                           </p>
                         </div>
@@ -257,11 +257,11 @@ export const MaterialsLibrary = ({ onClose, onOpenPosition }) => {
                         onClick={() => toggleSolution(position.puzzle_id)}
                         className="mt-2 w-full rounded-lg bg-amber-50 px-2 py-1.5 text-[10px] font-bold text-amber-800 hover:bg-amber-100 cursor-pointer"
                       >
-                        {solutionVisible ? 'Скрыть решение' : '👁 Показать решение тренеру'}
+                        {solutionVisible ? 'Hide Solution' : '👁 Show Solution to Coach'}
                       </button>
                       {solutionVisible && (
                         <div className="mt-1.5 break-words rounded-lg bg-slate-900 p-2 font-mono text-[10px] text-white">
-                          {position.solution_uci || 'Решение не указано'}
+                          {position.solution_uci || 'No solution provided'}
                         </div>
                       )}
 
@@ -270,7 +270,7 @@ export const MaterialsLibrary = ({ onClose, onOpenPosition }) => {
                         onClick={() => onOpenPosition(position)}
                         className="mt-2 w-full rounded-xl bg-blue-600 py-2 text-xs font-bold text-white transition hover:bg-blue-700 cursor-pointer"
                       >
-                        Открыть на доске →
+                        Open on Board →
                       </button>
                     </article>
                   );

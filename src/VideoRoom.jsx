@@ -24,8 +24,8 @@ export const VideoRoom = memo(function VideoRoom({ lesson, isObserver = false })
       if (cancelled) return;
 
       if (functionError || !data?.jwt || !data?.appId) {
-        console.error('Ошибка получения Jitsi JWT:', functionError || data);
-        setError('Не удалось подключить видеозвонок');
+        console.error('Jitsi JWT error:', functionError || data);
+        setError('Could not connect to the video call');
         setLoading(false);
         return;
       }
@@ -45,7 +45,7 @@ export const VideoRoom = memo(function VideoRoom({ lesson, isObserver = false })
   }, [lesson?.id]);
 
   const configOverwrite = useMemo(() => ({
-    // Урок сразу работает через видеомост Jitsi. Иначе при подключении
+    // Lesson сразу работает через видеомост Jitsi. Иначе при подключении
     // нового участника Jitsi может переключить тип соединения.
     p2p: { enabled: false },
     prejoinConfig: { enabled: false },
@@ -79,7 +79,7 @@ export const VideoRoom = memo(function VideoRoom({ lesson, isObserver = false })
   if (loading) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-gray-900 text-gray-300 text-xs">
-        Подключение к видеозвонку...
+        Connecting to video call...
       </div>
     );
   }
@@ -87,13 +87,13 @@ export const VideoRoom = memo(function VideoRoom({ lesson, isObserver = false })
   if (error || !meeting) {
     return (
       <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-gray-900 text-gray-300 text-xs">
-        <p>{error || 'Видеозвонок недоступен'}</p>
+        <p>{error || 'Video call unavailable'}</p>
         <button
           type="button"
           onClick={() => window.location.reload()}
           className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
         >
-          Повторить подключение
+          Retry Connection
         </button>
       </div>
     );
