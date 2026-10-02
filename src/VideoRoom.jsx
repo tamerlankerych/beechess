@@ -15,9 +15,8 @@ export const VideoRoom = memo(function VideoRoom({ lesson, isObserver = false, i
       setLoading(true);
       setError('');
 
-      const roomName = lesson.isGroup
-        ? `chess-group-${lesson.id}`
-        : `chess-lesson-${lesson.id}`;
+      // Одна комната для всех, кто в этом уроке — по lesson.id
+      const roomName = `chess-lesson-${lesson.id}`;
 
       const { data, error: functionError } = await supabase.functions.invoke('jitsi-token', {
         body: { roomName, isModerator: !isObserver && isTeacher },
@@ -44,7 +43,7 @@ export const VideoRoom = memo(function VideoRoom({ lesson, isObserver = false, i
     return () => {
       cancelled = true;
     };
-  }, [lesson?.id, lesson?.isGroup, isObserver, isTeacher]);
+  }, [lesson?.id, isObserver, isTeacher]);
 
   const configOverwrite = useMemo(
     () => ({
