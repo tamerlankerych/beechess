@@ -13,30 +13,35 @@ import { ChessPieceIcon } from './ChessPieceIcon.jsx';
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
 const INITIAL_TREE = {
-  root: { id: 'root', fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', san: '', parentId: null, children: [], color: 'w' }
+  root: {
+    id: 'root',
+    fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    san: '',
+    parentId: null,
+    children: [],
+    color: 'w',
+  },
 };
 
 const PIECES_PALETTE = [
-  { piece: 'wK', name: 'White King', fenChar: 'K' },
-  { piece: 'wQ', name: 'White Queen', fenChar: 'Q' },
-  { piece: 'wR', name: 'White Rook', fenChar: 'R' },
-  { piece: 'wB', name: 'White Bishop', fenChar: 'B' },
-  { piece: 'wN', name: 'White Knight', fenChar: 'N' },
-  { piece: 'wP', name: 'White Pawn', fenChar: 'P' },
-  { piece: 'bK', name: 'Black King', fenChar: 'k' },
-  { piece: 'bQ', name: 'Black Queen', fenChar: 'q' },
-  { piece: 'bR', name: 'Black Rook', fenChar: 'r' },
-  { piece: 'bB', name: 'Black Bishop', fenChar: 'b' },
-  { piece: 'bN', name: 'Black Knight', fenChar: 'n' },
-  { piece: 'bP', name: 'Black Pawn', fenChar: 'p' },
+  { piece: 'wK', name: 'Белый король', fenChar: 'K' },
+  { piece: 'wQ', name: 'Белый ферзь', fenChar: 'Q' },
+  { piece: 'wR', name: 'Белая ладья', fenChar: 'R' },
+  { piece: 'wB', name: 'Белый слон', fenChar: 'B' },
+  { piece: 'wN', name: 'Белый конь', fenChar: 'N' },
+  { piece: 'wP', name: 'Белая пешка', fenChar: 'P' },
+  { piece: 'bK', name: 'Чёрный король', fenChar: 'k' },
+  { piece: 'bQ', name: 'Чёрный ферзь', fenChar: 'q' },
+  { piece: 'bR', name: 'Чёрная ладья', fenChar: 'r' },
+  { piece: 'bB', name: 'Чёрный слон', fenChar: 'b' },
+  { piece: 'bN', name: 'Чёрный конь', fenChar: 'n' },
+  { piece: 'bP', name: 'Чёрная пешка', fenChar: 'p' },
 ];
 
 const playSound = (type) => {
   try {
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') {
-      audioCtx.resume();
-    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     osc.connect(gain);
@@ -61,7 +66,7 @@ const playSound = (type) => {
       osc.stop(now + 0.05);
     }
   } catch {
-    // Звук не является обязательным: браузер может запретить AudioContext.
+    // Звук не обязателен — браузер может запретить AudioContext.
   }
 };
 
@@ -76,8 +81,10 @@ const formatSanWithIcons = (san) => {
 };
 
 const updateFenBoard = (currentFen, updaterFn) => {
-  const parts = (currentFen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1').split(' ');
-  let boardPart = parts[0];
+  const parts = (
+    currentFen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
+  ).split(' ');
+  const boardPart = parts[0];
   const rows = boardPart.split('/');
   const board = [];
   for (let r = 0; r < 8; r++) {
@@ -96,7 +103,7 @@ const updateFenBoard = (currentFen, updaterFn) => {
 
   updaterFn(board);
 
-  const newRows = board.map(row => {
+  const newRows = board.map((row) => {
     let emptyCount = 0;
     let res = '';
     for (let cell of row) {
@@ -142,6 +149,9 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   const chessboardInstance = useRef(null);
   const gameRef = useRef(new Chess());
   const channelRef = useRef(null);
+
+  const saveQueueRef = useRef(null);
+  const saveTimerRef = useRef(null);
 
   const [canStudentMove, setCanStudentMove] = useState(false);
   const [isVideoOpen, setIsVideoOpen] = useState(true);
@@ -200,15 +210,30 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
     if (whiteClockDomRef.current) whiteClockDomRef.current.textContent = formatTime(timerW);
     if (blackClockDomRef.current) blackClockDomRef.current.textContent = formatTime(timerB);
-  }, [currentId, tree, timerW, timerB, activeColor, clockStarted, incrementMs, canStudentMove, isEditorMode, tempEditorFen, selectedEditorPiece, editorTurn, editorCastling]);
+  }, [
+    currentId,
+    tree,
+    timerW,
+    timerB,
+    activeColor,
+    clockStarted,
+    incrementMs,
+    canStudentMove,
+    isEditorMode,
+    tempEditorFen,
+    selectedEditorPiece,
+    editorTurn,
+    editorCastling,
+  ]);
 
-  const saveState = useCallback(async (fen, studentCanMove, sharedState = {}) => {
-    if (!lesson?.id) return;
+  // ИСПРАВЛЕНО: зависимость по lesson?.id, а не по объекту lesson
+  const saveState = useCallback(
+    async (fen, studentCanMove, sharedState = {}) => {
+      if (!lesson?.id) return;
 
-    try {
       const lessonState = {
         id: lesson.id,
-        title: lesson.title || 'Lesson',
+        title: lesson.title || 'Урок',
         fen,
         can_student_move: studentCanMove,
         timer_w: Math.round(timerWRef.current),
@@ -216,34 +241,57 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         increment_ms: incrementMsRef.current,
         active_color: activeColorRef.current,
         clock_started: clockStartedRef.current,
-        clock_updated_at: new Date().toISOString()
+        clock_updated_at: new Date().toISOString(),
       };
 
       if (sharedState.moveTree) lessonState.move_tree = sharedState.moveTree;
       if (sharedState.currentNodeId) lessonState.current_node_id = sharedState.currentNodeId;
 
-      const { error } = await supabase
-        .from('lessons')
-        .upsert(lessonState, { onConflict: 'id' });
+      saveQueueRef.current = lessonState;
+      if (saveTimerRef.current) return;
 
-      if (error) throw error;
-    } catch (e) {
-      console.error('State save error:', e);
-    }
-  }, [lesson]);
+      saveTimerRef.current = setTimeout(async () => {
+        saveTimerRef.current = null;
+        const payload = saveQueueRef.current;
+        saveQueueRef.current = null;
 
+        if (!payload) return;
+
+        try {
+          const { error } = await supabase
+            .from('lessons')
+            .upsert(payload, { onConflict: 'id' });
+          if (error) throw error;
+        } catch (e) {
+          console.error('Ошибка сохранения состояния:', e);
+        }
+      }, 3000);
+    },
+    [lesson?.id, lesson?.title]
+  );
+
+  // ИСПРАВЛЕНО: теперь шлём broadcast при переключении
   const toggleStudentAccess = () => {
     const nextState = !canStudentMove;
     setCanStudentMove(nextState);
+    canStudentMoveRef.current = nextState;
     saveState(gameRef.current.fen(), nextState);
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'student_access',
+      payload: { canStudentMove: nextState },
+    });
   };
 
   useEffect(() => {
     if (!clockStarted) return;
-    const interval = setInterval(() => {
+
+    const tickInterval = setInterval(() => {
       if (activeColorRef.current === 'w') {
         timerWRef.current = Math.max(0, timerWRef.current - 100);
-        if (whiteClockDomRef.current) whiteClockDomRef.current.textContent = formatTime(timerWRef.current);
+        if (whiteClockDomRef.current) {
+          whiteClockDomRef.current.textContent = formatTime(timerWRef.current);
+        }
         if (timerWRef.current <= 0) {
           clockStartedRef.current = false;
           setClockStarted(false);
@@ -258,14 +306,16 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                 timerB: timerBRef.current,
                 incrementMs: incrementMsRef.current,
                 activeColor: activeColorRef.current,
-                clockStarted: false
-              }
+                clockStarted: false,
+              },
             });
           }
         }
       } else {
         timerBRef.current = Math.max(0, timerBRef.current - 100);
-        if (blackClockDomRef.current) blackClockDomRef.current.textContent = formatTime(timerBRef.current);
+        if (blackClockDomRef.current) {
+          blackClockDomRef.current.textContent = formatTime(timerBRef.current);
+        }
         if (timerBRef.current <= 0) {
           clockStartedRef.current = false;
           setClockStarted(false);
@@ -280,15 +330,23 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                 timerB: 0,
                 incrementMs: incrementMsRef.current,
                 activeColor: activeColorRef.current,
-                clockStarted: false
-              }
+                clockStarted: false,
+              },
             });
           }
         }
       }
     }, 100);
 
-    return () => clearInterval(interval);
+    const syncInterval = setInterval(() => {
+      setTimerW(timerWRef.current);
+      setTimerB(timerBRef.current);
+    }, 1000);
+
+    return () => {
+      clearInterval(tickInterval);
+      clearInterval(syncInterval);
+    };
   }, [clockStarted, isTeacher, saveState]);
 
   const setTimeControl = (minutes, incSeconds) => {
@@ -310,7 +368,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       timer_b: totalMs,
       increment_ms: incMs,
       active_color: 'w',
-      clock_started: false
+      clock_started: false,
     });
 
     channelRef.current?.send({
@@ -321,8 +379,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         timerB: totalMs,
         incrementMs: incMs,
         activeColor: 'w',
-        clockStarted: false
-      }
+        clockStarted: false,
+      },
     });
   };
 
@@ -340,8 +398,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         timerB: timerBRef.current,
         incrementMs: incrementMsRef.current,
         activeColor: activeColorRef.current,
-        clockStarted: nextState
-      }
+        clockStarted: nextState,
+      },
     });
   };
 
@@ -352,7 +410,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     channelRef.current?.send({
       type: 'broadcast',
       event: 'board_orientation',
-      payload: { orientation: nextOrientation }
+      payload: { orientation: nextOrientation },
     });
   };
 
@@ -369,8 +427,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           san: '',
           parentId: null,
           children: [],
-          color: preparedGame.turn()
-        }
+          color: preparedGame.turn(),
+        },
       };
 
       gameRef.current = preparedGame;
@@ -395,7 +453,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
       await saveState(preparedFen, canStudentMoveRef.current, {
         moveTree: nextTree,
-        currentNodeId: 'root'
+        currentNodeId: 'root',
       });
 
       channelRef.current?.send({
@@ -404,8 +462,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         payload: {
           fen: preparedFen,
           moveTree: nextTree,
-          currentNodeId: 'root'
-        }
+          currentNodeId: 'root',
+        },
       });
       channelRef.current?.send({
         type: 'broadcast',
@@ -415,45 +473,48 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           timerB: timerBRef.current,
           incrementMs: incrementMsRef.current,
           activeColor: preparedGame.turn(),
-          clockStarted: false
-        }
+          clockStarted: false,
+        },
       });
       channelRef.current?.send({ type: 'broadcast', event: 'clear_drawings', payload: {} });
     } catch (error) {
-      console.error('Failed to open training position:', error);
-      window.alert('This position is corrupted and cannot be opened.');
+      console.error('Не удалось открыть учебную позицию:', error);
+      window.alert('Позиция повреждена и не может быть открыта.');
     }
   };
 
-  const jumpToNode = useCallback((nodeId) => {
-    const targetNode = treeRef.current[nodeId];
-    if (!targetNode) return;
-    currentIdRef.current = nodeId;
-    setCurrentId(nodeId);
-    try {
-      gameRef.current.load(targetNode.fen, { skipValidation: true });
-      if (chessboardInstance.current) {
-        chessboardInstance.current.setPosition(targetNode.fen, true);
-      }
-
-      saveState(targetNode.fen, canStudentMoveRef.current, {
-        moveTree: treeRef.current,
-        currentNodeId: nodeId
-      });
-
-      channelRef.current?.send({
-        type: 'broadcast',
-        event: 'make_move',
-        payload: {
-          fen: targetNode.fen,
-          moveTree: treeRef.current,
-          currentNodeId: nodeId
+  const jumpToNode = useCallback(
+    (nodeId) => {
+      const targetNode = treeRef.current[nodeId];
+      if (!targetNode) return;
+      currentIdRef.current = nodeId;
+      setCurrentId(nodeId);
+      try {
+        gameRef.current.load(targetNode.fen, { skipValidation: true });
+        if (chessboardInstance.current) {
+          chessboardInstance.current.setPosition(targetNode.fen, true);
         }
-      });
-    } catch (err) {
-      console.error("FEN error:", err);
-    }
-  }, [saveState]);
+
+        saveState(targetNode.fen, canStudentMoveRef.current, {
+          moveTree: treeRef.current,
+          currentNodeId: nodeId,
+        });
+
+        channelRef.current?.send({
+          type: 'broadcast',
+          event: 'make_move',
+          payload: {
+            fen: targetNode.fen,
+            moveTree: treeRef.current,
+            currentNodeId: nodeId,
+          },
+        });
+      } catch (err) {
+        console.error('Ошибка FEN:', err);
+      }
+    },
+    [saveState]
+  );
 
   useEffect(() => {
     if (!isTeacher) return;
@@ -473,122 +534,128 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [jumpToNode, isTeacher]);
 
-  const applyRemoteMove = useCallback((moveResult, newFen, syncedTree = null, syncedCurrentId = null) => {
-    if (moveResult.captured) playSound('capture');
-    else playSound('move');
+  const applyRemoteMove = useCallback(
+    (moveResult, newFen, syncedTree = null, syncedCurrentId = null) => {
+      if (moveResult.captured) playSound('capture');
+      else playSound('move');
 
-    if (chessboardInstance.current) {
-      chessboardInstance.current.setPosition(newFen, true);
-    }
-
-    let nextTree;
-    let nextCurrentId;
-
-    if (syncedTree && syncedCurrentId && syncedTree[syncedCurrentId]) {
-      nextTree = syncedTree;
-      nextCurrentId = syncedCurrentId;
-    } else {
-      const activeId = currentIdRef.current;
-      const activeTree = treeRef.current;
-      const parentNode = activeTree[activeId] || activeTree.root;
-      const existingChildId = (parentNode.children || []).find(
-        childId => activeTree[childId]?.san === moveResult.san
-      );
-
-      if (existingChildId) {
-        nextTree = activeTree;
-        nextCurrentId = existingChildId;
-      } else {
-        const newId = generateId();
-        const newNode = {
-          id: newId,
-          fen: newFen,
-          san: moveResult.san,
-          color: moveResult.color,
-          parentId: parentNode.id,
-          children: []
-        };
-
-        nextTree = {
-          ...activeTree,
-          [parentNode.id]: {
-            ...parentNode,
-            children: [...(parentNode.children || []), newId]
-          },
-          [newId]: newNode
-        };
-        nextCurrentId = newId;
+      if (chessboardInstance.current) {
+        chessboardInstance.current.setPosition(newFen, true);
       }
-    }
 
-    treeRef.current = nextTree;
-    currentIdRef.current = nextCurrentId;
-    setTree(nextTree);
-    setCurrentId(nextCurrentId);
+      let nextTree;
+      let nextCurrentId;
 
-    let nextW = timerWRef.current;
-    let nextB = timerBRef.current;
-    const currColor = activeColorRef.current;
-    const inc = incrementMsRef.current;
+      if (syncedTree && syncedCurrentId && syncedTree[syncedCurrentId]) {
+        nextTree = syncedTree;
+        nextCurrentId = syncedCurrentId;
+      } else {
+        const activeId = currentIdRef.current;
+        const activeTree = treeRef.current;
+        const parentNode = activeTree[activeId] || activeTree.root;
+        const existingChildId = (parentNode.children || []).find(
+          (childId) => activeTree[childId]?.san === moveResult.san
+        );
 
-    if (clockStartedRef.current) {
-      if (currColor === 'w') nextW += inc;
-      else nextB += inc;
-    }
-    const nextColor = currColor === 'w' ? 'b' : 'w';
+        if (existingChildId) {
+          nextTree = activeTree;
+          nextCurrentId = existingChildId;
+        } else {
+          const newId = generateId();
+          const newNode = {
+            id: newId,
+            fen: newFen,
+            san: moveResult.san,
+            color: moveResult.color,
+            parentId: parentNode.id,
+            children: [],
+          };
 
-    timerWRef.current = nextW;
-    timerBRef.current = nextB;
-    activeColorRef.current = nextColor;
-    setTimerW(nextW);
-    setTimerB(nextB);
-    setActiveColor(nextColor);
-
-    if (whiteClockDomRef.current) whiteClockDomRef.current.textContent = formatTime(nextW);
-    if (blackClockDomRef.current) blackClockDomRef.current.textContent = formatTime(nextB);
-
-    if (chessboardInstance.current) {
-      chessboardInstance.current.removeMarkers();
-      chessboardInstance.current.removeArrows();
-    }
-
-    return { moveTree: nextTree, currentNodeId: nextCurrentId };
-  }, []);
-
-  const executeMove = useCallback((from, to, promotion = 'q') => {
-    try {
-      const move = gameRef.current.move({ from, to, promotion });
-      if (!move) return false;
-
-      const newFen = gameRef.current.fen();
-      const sharedMoveState = applyRemoteMove(move, newFen);
-      saveState(newFen, canStudentMoveRef.current, sharedMoveState);
-
-      channelRef.current?.send({
-        type: 'broadcast',
-        event: 'make_move',
-        payload: {
-          from,
-          to,
-          promotion,
-          fen: newFen,
-          san: move.san,
-          captured: !!move.captured,
-          color: move.color,
-          timerW: timerWRef.current,
-          timerB: timerBRef.current,
-          activeColor: activeColorRef.current,
-          moveTree: sharedMoveState.moveTree,
-          currentNodeId: sharedMoveState.currentNodeId
+          nextTree = {
+            ...activeTree,
+            [parentNode.id]: {
+              ...parentNode,
+              children: [...(parentNode.children || []), newId],
+            },
+            [newId]: newNode,
+          };
+          nextCurrentId = newId;
         }
-      });
-      channelRef.current?.send({ type: 'broadcast', event: 'clear_drawings', payload: {} });
-      return true;
-    } catch {
-      chessboardInstance.current?.setPosition(gameRef.current.fen());
-      return false;
-    }
-  }, [applyRemoteMove, saveState]);
+      }
+
+      treeRef.current = nextTree;
+      currentIdRef.current = nextCurrentId;
+      setTree(nextTree);
+      setCurrentId(nextCurrentId);
+
+      let nextW = timerWRef.current;
+      let nextB = timerBRef.current;
+      const currColor = activeColorRef.current;
+      const inc = incrementMsRef.current;
+
+      if (clockStartedRef.current) {
+        if (currColor === 'w') nextW += inc;
+        else nextB += inc;
+      }
+      const nextColor = currColor === 'w' ? 'b' : 'w';
+
+      timerWRef.current = nextW;
+      timerBRef.current = nextB;
+      activeColorRef.current = nextColor;
+      setTimerW(nextW);
+      setTimerB(nextB);
+      setActiveColor(nextColor);
+
+      if (whiteClockDomRef.current) whiteClockDomRef.current.textContent = formatTime(nextW);
+      if (blackClockDomRef.current) blackClockDomRef.current.textContent = formatTime(nextB);
+
+      if (chessboardInstance.current) {
+        chessboardInstance.current.removeMarkers();
+        chessboardInstance.current.removeArrows();
+      }
+
+      return { moveTree: nextTree, currentNodeId: nextCurrentId };
+    },
+    []
+  );
+
+  const executeMove = useCallback(
+    (from, to, promotion = 'q') => {
+      try {
+        const move = gameRef.current.move({ from, to, promotion });
+        if (!move) return false;
+
+        const newFen = gameRef.current.fen();
+        const sharedMoveState = applyRemoteMove(move, newFen);
+        saveState(newFen, canStudentMoveRef.current, sharedMoveState);
+
+        channelRef.current?.send({
+          type: 'broadcast',
+          event: 'make_move',
+          payload: {
+            from,
+            to,
+            promotion,
+            fen: newFen,
+            san: move.san,
+            captured: !!move.captured,
+            color: move.color,
+            timerW: timerWRef.current,
+            timerB: timerBRef.current,
+            activeColor: activeColorRef.current,
+            moveTree: sharedMoveState.moveTree,
+            currentNodeId: sharedMoveState.currentNodeId,
+          },
+        });
+        channelRef.current?.send({ type: 'broadcast', event: 'clear_drawings', payload: {} });
+        return true;
+      } catch {
+        chessboardInstance.current?.setPosition(gameRef.current.fen());
+        return false;
+      }
+    },
+    [applyRemoteMove, saveState]
+  );
 
   const choosePromotion = (promotion) => {
     if (!pendingPromotion) return;
@@ -596,11 +663,11 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     setPendingPromotion(null);
     executeMove(from, to, promotion);
   };
-
   useEffect(() => {
     if (!boardRef.current || !lesson?.id) return;
 
-    const initialFen = lesson.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+    const initialFen =
+      lesson.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
     const initialTree = lesson.move_tree?.root
       ? lesson.move_tree
       : {
@@ -610,8 +677,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             san: '',
             parentId: null,
             children: [],
-            color: initialFen.split(' ')[1] || 'w'
-          }
+            color: initialFen.split(' ')[1] || 'w',
+          },
         };
     const initialCurrentId = initialTree[lesson.current_node_id]
       ? lesson.current_node_id
@@ -635,8 +702,12 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     const restoredIncrementMs = lesson.increment_ms ?? 5000;
 
     if (restoredClockStarted && lesson.clock_updated_at) {
-      const elapsedMs = Math.max(0, Date.now() - new Date(lesson.clock_updated_at).getTime());
-      if (restoredActiveColor === 'w') restoredTimerW = Math.max(0, restoredTimerW - elapsedMs);
+      const elapsedMs = Math.max(
+        0,
+        Date.now() - new Date(lesson.clock_updated_at).getTime()
+      );
+      if (restoredActiveColor === 'w')
+        restoredTimerW = Math.max(0, restoredTimerW - elapsedMs);
       else restoredTimerB = Math.max(0, restoredTimerB - elapsedMs);
 
       if (restoredTimerW <= 0 || restoredTimerB <= 0) restoredClockStarted = false;
@@ -652,7 +723,10 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     setIncrementMs(restoredIncrementMs);
     setActiveColor(restoredActiveColor);
     setClockStarted(restoredClockStarted);
-    if (lesson.can_student_move !== undefined) setCanStudentMove(lesson.can_student_move);
+    if (lesson.can_student_move !== undefined) {
+      setCanStudentMove(lesson.can_student_move);
+      canStudentMoveRef.current = lesson.can_student_move;
+    }
 
     if (chessboardInstance.current) {
       chessboardInstance.current.destroy();
@@ -662,33 +736,37 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       chessboardInstance.current = new Chessboard(boardRef.current, {
         position: gameRef.current.fen(),
         orientation: orientation,
-        assetsUrl: "/assets/",
+        assetsUrl: '/assets/',
         style: {
           borderType: BORDER_TYPE.thin,
-          animationDuration: 150
+          animationDuration: 150,
         },
         extensions: [
           { class: Markers, props: { autoMarkers: null } },
-          { class: Arrows, props: { headSize: 5 } }
-        ]
+          { class: Arrows, props: { headSize: 5 } },
+        ],
       });
 
       chessboardInstance.current.enableMoveInput((event) => {
         if (isEditorModeRef.current) {
-          if (event.type === "moveInputStarted") return true;
-          if (event.type === "moveInputFinished" && event.squareFrom && !event.squareTo) {
+          if (event.type === 'moveInputStarted') return true;
+          if (event.type === 'moveInputFinished' && event.squareFrom && !event.squareTo) {
             const fromFile = event.squareFrom.charCodeAt(0) - 97;
             const fromRank = 8 - parseInt(event.squareFrom[1]);
             const updated = updateFenBoard(tempEditorFenRef.current, (board) => {
               board[fromRank][fromFile] = null;
             });
-            const fullUpdatedFen = buildFullFen(updated, editorTurnRef.current, editorCastlingRef.current);
+            const fullUpdatedFen = buildFullFen(
+              updated,
+              editorTurnRef.current,
+              editorCastlingRef.current
+            );
             tempEditorFenRef.current = fullUpdatedFen;
             setTempEditorFen(fullUpdatedFen);
             chessboardInstance.current?.setPosition(fullUpdatedFen, false);
             return false;
           }
-          if (event.type === "moveInputFinished" && event.squareFrom && event.squareTo) {
+          if (event.type === 'moveInputFinished' && event.squareFrom && event.squareTo) {
             const fromFile = event.squareFrom.charCodeAt(0) - 97;
             const fromRank = 8 - parseInt(event.squareFrom[1]);
             const toFile = event.squareTo.charCodeAt(0) - 97;
@@ -700,7 +778,11 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
               board[toRank][toFile] = piece;
             });
 
-            const fullUpdatedFen = buildFullFen(updated, editorTurnRef.current, editorCastlingRef.current);
+            const fullUpdatedFen = buildFullFen(
+              updated,
+              editorTurnRef.current,
+              editorCastlingRef.current
+            );
             tempEditorFenRef.current = fullUpdatedFen;
             setTempEditorFen(fullUpdatedFen);
             if (chessboardInstance.current) {
@@ -712,10 +794,10 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
         if (isObserver || (!isTeacher && !canStudentMoveRef.current)) return false;
 
-        if (event.type === "moveInputStarted" && event.squareFrom) {
+        if (event.type === 'moveInputStarted' && event.squareFrom) {
           const legalMoves = gameRef.current.moves({
             square: event.squareFrom,
-            verbose: true
+            verbose: true,
           });
 
           event.chessboard.removeLegalMovesMarkers();
@@ -726,24 +808,24 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           return true;
         }
 
-        if (event.type === "moveInputCanceled") {
+        if (event.type === 'moveInputCanceled') {
           chessboardInstance.current?.removeLegalMovesMarkers();
           return false;
         }
 
-        if (event.type === "moveInputFinished" && event.squareFrom && event.squareTo) {
+        if (event.type === 'moveInputFinished' && event.squareFrom && event.squareTo) {
           chessboardInstance.current?.removeLegalMovesMarkers();
           const piece = gameRef.current.get(event.squareFrom);
-          const reachesLastRank = piece?.type === 'p' && (
-            (piece.color === 'w' && event.squareTo[1] === '8') ||
-            (piece.color === 'b' && event.squareTo[1] === '1')
-          );
+          const reachesLastRank =
+            piece?.type === 'p' &&
+            ((piece.color === 'w' && event.squareTo[1] === '8') ||
+              (piece.color === 'b' && event.squareTo[1] === '1'));
 
           if (reachesLastRank) {
             setPendingPromotion({
               from: event.squareFrom,
               to: event.squareTo,
-              color: piece.color
+              color: piece.color,
             });
             chessboardInstance.current?.setPosition(gameRef.current.fen());
             return false;
@@ -754,66 +836,75 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         return true;
       });
     } catch (err) {
-      console.error('cm-chessboard initialization error:', err);
+      console.error('Ошибка инициализации cm-chessboard:', err);
     }
 
     let channelCancelled = false;
     const channel = supabase.channel(`lesson-${lesson.id}`, {
       config: {
-        private: true,
-        broadcast: { self: false }
-      }
+        broadcast: { self: false },
+      },
     });
 
     channel
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'lessons',
-        filter: `id=eq.${lesson.id}`
-      }, (payload) => {
-        if (!payload.new) return;
-        if (payload.new.can_student_move !== undefined) setCanStudentMove(payload.new.can_student_move);
-        if (payload.new.timer_w !== undefined) {
-          timerWRef.current = payload.new.timer_w;
-          setTimerW(payload.new.timer_w);
-          if (whiteClockDomRef.current) whiteClockDomRef.current.textContent = formatTime(payload.new.timer_w);
-        }
-        if (payload.new.timer_b !== undefined) {
-          timerBRef.current = payload.new.timer_b;
-          setTimerB(payload.new.timer_b);
-          if (blackClockDomRef.current) blackClockDomRef.current.textContent = formatTime(payload.new.timer_b);
-        }
-        if (payload.new.active_color !== undefined) {
-          activeColorRef.current = payload.new.active_color;
-          setActiveColor(payload.new.active_color);
-        }
-        if (payload.new.clock_started !== undefined) {
-          clockStartedRef.current = payload.new.clock_started;
-          setClockStarted(payload.new.clock_started);
-        }
-        if (payload.new.increment_ms !== undefined) {
-          incrementMsRef.current = payload.new.increment_ms;
-          setIncrementMs(payload.new.increment_ms);
-        }
-        if (payload.new.move_tree?.root) {
-          const syncedCurrentId = payload.new.move_tree[payload.new.current_node_id]
-            ? payload.new.current_node_id
-            : 'root';
-          treeRef.current = payload.new.move_tree;
-          currentIdRef.current = syncedCurrentId;
-          setTree(payload.new.move_tree);
-          setCurrentId(syncedCurrentId);
-        }
-        if (payload.new.fen && payload.new.fen !== gameRef.current.fen()) {
-          try {
-            gameRef.current.load(payload.new.fen, { skipValidation: true });
-            if (chessboardInstance.current) chessboardInstance.current.setPosition(payload.new.fen, true);
-          } catch {
-            // Некорректное внешнее состояние игнорируется до следующей синхронизации.
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'lessons',
+          filter: `id=eq.${lesson.id}`,
+        },
+        (payload) => {
+          if (!payload.new) return;
+          if (payload.new.can_student_move !== undefined) {
+            setCanStudentMove(payload.new.can_student_move);
+            canStudentMoveRef.current = payload.new.can_student_move;
+          }
+          if (payload.new.timer_w !== undefined) {
+            timerWRef.current = payload.new.timer_w;
+            setTimerW(payload.new.timer_w);
+            if (whiteClockDomRef.current)
+              whiteClockDomRef.current.textContent = formatTime(payload.new.timer_w);
+          }
+          if (payload.new.timer_b !== undefined) {
+            timerBRef.current = payload.new.timer_b;
+            setTimerB(payload.new.timer_b);
+            if (blackClockDomRef.current)
+              blackClockDomRef.current.textContent = formatTime(payload.new.timer_b);
+          }
+          if (payload.new.active_color !== undefined) {
+            activeColorRef.current = payload.new.active_color;
+            setActiveColor(payload.new.active_color);
+          }
+          if (payload.new.clock_started !== undefined) {
+            clockStartedRef.current = payload.new.clock_started;
+            setClockStarted(payload.new.clock_started);
+          }
+          if (payload.new.increment_ms !== undefined) {
+            incrementMsRef.current = payload.new.increment_ms;
+            setIncrementMs(payload.new.increment_ms);
+          }
+          if (payload.new.move_tree?.root) {
+            const syncedCurrentId = payload.new.move_tree[payload.new.current_node_id]
+              ? payload.new.current_node_id
+              : 'root';
+            treeRef.current = payload.new.move_tree;
+            currentIdRef.current = syncedCurrentId;
+            setTree(payload.new.move_tree);
+            setCurrentId(syncedCurrentId);
+          }
+          if (payload.new.fen && payload.new.fen !== gameRef.current.fen()) {
+            try {
+              gameRef.current.load(payload.new.fen, { skipValidation: true });
+              if (chessboardInstance.current)
+                chessboardInstance.current.setPosition(payload.new.fen, true);
+            } catch {
+              // Некорректное внешнее состояние игнорируем.
+            }
           }
         }
-      })
+      )
       .on('broadcast', { event: 'make_move' }, ({ payload }) => {
         if (!payload) return;
         if (payload.from && payload.to) {
@@ -821,36 +912,38 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             const move = gameRef.current.move({
               from: payload.from,
               to: payload.to,
-              promotion: payload.promotion || 'q'
+              promotion: payload.promotion || 'q',
             });
             if (move) {
-              applyRemoteMove(
-                move,
-                payload.fen,
-                payload.moveTree,
-                payload.currentNodeId
-              );
+              applyRemoteMove(move, payload.fen, payload.moveTree, payload.currentNodeId);
               if (payload.timerW !== undefined) {
                 timerWRef.current = payload.timerW;
                 setTimerW(payload.timerW);
-                if (whiteClockDomRef.current) whiteClockDomRef.current.textContent = formatTime(payload.timerW);
+                if (whiteClockDomRef.current)
+                  whiteClockDomRef.current.textContent = formatTime(payload.timerW);
               }
               if (payload.timerB !== undefined) {
                 timerBRef.current = payload.timerB;
                 setTimerB(payload.timerB);
-                if (blackClockDomRef.current) blackClockDomRef.current.textContent = formatTime(payload.timerB);
+                if (blackClockDomRef.current)
+                  blackClockDomRef.current.textContent = formatTime(payload.timerB);
               }
-              if (payload.activeColor !== undefined) setActiveColor(payload.activeColor);
+              if (payload.activeColor !== undefined) {
+                activeColorRef.current = payload.activeColor;
+                setActiveColor(payload.activeColor);
+              }
             }
           } catch {
             if (payload.fen) {
               gameRef.current.load(payload.fen, { skipValidation: true });
-              if (chessboardInstance.current) chessboardInstance.current.setPosition(payload.fen, true);
+              if (chessboardInstance.current)
+                chessboardInstance.current.setPosition(payload.fen, true);
             }
           }
         } else if (payload.fen) {
           gameRef.current.load(payload.fen, { skipValidation: true });
-          if (chessboardInstance.current) chessboardInstance.current.setPosition(payload.fen, true);
+          if (chessboardInstance.current)
+            chessboardInstance.current.setPosition(payload.fen, true);
           if (payload.moveTree?.root) {
             const syncedCurrentId = payload.moveTree[payload.currentNodeId]
               ? payload.currentNodeId
@@ -885,6 +978,14 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           setClockStarted(payload.clockStarted);
         }
       })
+      // НОВЫЙ слушатель для разблокировки ходов
+      .on('broadcast', { event: 'student_access' }, ({ payload }) => {
+        if (!payload) return;
+        if (payload.canStudentMove !== undefined) {
+          setCanStudentMove(payload.canStudentMove);
+          canStudentMoveRef.current = payload.canStudentMove;
+        }
+      })
       .on('broadcast', { event: 'board_orientation' }, ({ payload }) => {
         if (payload?.orientation !== COLOR.white && payload?.orientation !== COLOR.black) return;
         setOrientation(payload.orientation);
@@ -893,13 +994,16 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         if (!payload || !chessboardInstance.current) return;
 
         if (payload.kind === 'circle' && payload.square) {
-          if (payload.visible) chessboardInstance.current.addMarker(MARKER_TYPE.circle, payload.square);
+          if (payload.visible)
+            chessboardInstance.current.addMarker(MARKER_TYPE.circle, payload.square);
           else chessboardInstance.current.removeMarkers(MARKER_TYPE.circle, payload.square);
         }
 
         if (payload.kind === 'arrow' && payload.from && payload.to) {
-          if (payload.visible) chessboardInstance.current.addArrow(ARROW_TYPE.default, payload.from, payload.to);
-          else chessboardInstance.current.removeArrows(ARROW_TYPE.default, payload.from, payload.to);
+          if (payload.visible)
+            chessboardInstance.current.addArrow(ARROW_TYPE.default, payload.from, payload.to);
+          else
+            chessboardInstance.current.removeArrows(ARROW_TYPE.default, payload.from, payload.to);
         }
       })
       .on('broadcast', { event: 'clear_drawings' }, () => {
@@ -916,16 +1020,20 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         if (channelCancelled) return;
         channel.subscribe((status, error) => {
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-            console.error('Secure Realtime channel error:', status, error);
+            console.error('Ошибка Realtime-канала:', status, error);
           }
         });
       })
       .catch((error) => {
-        console.error('Failed to authorize Realtime connection:', error);
+        console.error('Не удалось авторизовать Realtime-соединение:', error);
       });
 
     return () => {
       channelCancelled = true;
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
       supabase.removeChannel(channel);
       if (channelRef.current === channel) channelRef.current = null;
       if (chessboardInstance.current) {
@@ -933,8 +1041,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         chessboardInstance.current = null;
       }
     };
-    // Доска создаётся заново только при смене комнаты. Остальные изменения
-    // приходят через realtime-канал и refs, иначе доска мигала бы после хода.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lesson?.id, applyRemoteMove, executeMove, isTeacher, isObserver]);
 
@@ -954,7 +1060,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       setTempEditorFen(fullUpdatedFen);
       chessboardInstance.current?.setPosition(fullUpdatedFen, false);
     } catch (err) {
-      console.error('Editor square update error:', err);
+      console.error('Ошибка обновления поля в редакторе:', err);
     }
   };
 
@@ -979,20 +1085,20 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     const square = squareEl.getAttribute('data-square');
     if (!square) return;
 
-    const fenChar = PIECES_PALETTE.find(p => p.piece === selectedEditorPiece)?.fenChar;
+    const fenChar = PIECES_PALETTE.find((p) => p.piece === selectedEditorPiece)?.fenChar;
     setEditorSquare(square, fenChar || null);
   };
 
   const handleUpdateEditorSettings = (newTurn, newCastling) => {
     try {
-      const updatedBoardOnly = updateFenBoard(tempEditorFen, () => { });
+      const updatedBoardOnly = updateFenBoard(tempEditorFen, () => {});
       const fullFen = buildFullFen(updatedBoardOnly, newTurn, newCastling);
       setTempEditorFen(fullFen);
       if (chessboardInstance.current) {
         chessboardInstance.current.setPosition(fullFen, false);
       }
     } catch (e) {
-      console.error("Position settings error:", e);
+      console.error('Ошибка настроек позиции:', e);
     }
   };
 
@@ -1016,7 +1122,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   };
 
   const handleSaveEditorPosition = () => {
-    const boardOnly = updateFenBoard(tempEditorFen, () => { });
+    const boardOnly = updateFenBoard(tempEditorFen, () => {});
     const finalFen = buildFullFen(boardOnly, editorTurn, editorCastling);
 
     try {
@@ -1026,7 +1132,14 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       }
 
       const newTree = {
-        root: { id: 'root', fen: finalFen, san: '', parentId: null, children: [], color: editorTurn }
+        root: {
+          id: 'root',
+          fen: finalFen,
+          san: '',
+          parentId: null,
+          children: [],
+          color: editorTurn,
+        },
       };
       treeRef.current = newTree;
       currentIdRef.current = 'root';
@@ -1038,7 +1151,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
       saveState(finalFen, canStudentMove, {
         moveTree: newTree,
-        currentNodeId: 'root'
+        currentNodeId: 'root',
       });
 
       if (channelRef.current) {
@@ -1049,13 +1162,13 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             fen: finalFen,
             activeColor: editorTurn,
             moveTree: newTree,
-            currentNodeId: 'root'
-          }
+            currentNodeId: 'root',
+          },
         });
         channelRef.current.send({ type: 'broadcast', event: 'clear_drawings', payload: {} });
       }
     } catch (err) {
-      console.error("Position save error:", err);
+      console.error('Ошибка сохранения позиции:', err);
     }
   };
 
@@ -1097,8 +1210,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         isRightClicking = true;
         startSquare = getSquareFromPoint(e.clientX, e.clientY);
       } else if (e.button === 0 && chessboardInstance.current && !isEditorModeRef.current) {
-        // Очищаем только тренерские рисунки. MARKER_TYPE.dot и bevel — это
-        // подсказки легальных ходов выбранной фигуры, их здесь удалять нельзя.
         chessboardInstance.current.removeMarkers(MARKER_TYPE.circle);
         chessboardInstance.current.removeArrows();
         if (channelRef.current) {
@@ -1113,7 +1224,13 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       if (e.button === 2 && isRightClicking && chessboardInstance.current) {
         const endSquare = getSquareFromPoint(e.clientX, e.clientY);
 
-        if (isEditorModeRef.current && e.ctrlKey && startSquare && endSquare && startSquare === endSquare) {
+        if (
+          isEditorModeRef.current &&
+          e.ctrlKey &&
+          startSquare &&
+          endSquare &&
+          startSquare === endSquare
+        ) {
           e.preventDefault();
           try {
             const file = startSquare.charCodeAt(0) - 97;
@@ -1125,30 +1242,44 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             setTempEditorFen(fullUpdatedFen);
             chessboardInstance.current.setPosition(fullUpdatedFen, false);
           } catch {
-            // Если редактирование не удалось, сохраняем текущую позицию.
+            // Если редактирование не удалось, оставляем текущую позицию.
           }
         } else if (!isEditorModeRef.current && startSquare && endSquare) {
           if (startSquare === endSquare) {
-            const existing = chessboardInstance.current.getMarkers(MARKER_TYPE.circle, startSquare);
+            const existing = chessboardInstance.current.getMarkers(
+              MARKER_TYPE.circle,
+              startSquare
+            );
             const visible = existing.length === 0;
-            if (visible) chessboardInstance.current.addMarker(MARKER_TYPE.circle, startSquare);
+            if (visible)
+              chessboardInstance.current.addMarker(MARKER_TYPE.circle, startSquare);
             else chessboardInstance.current.removeMarkers(MARKER_TYPE.circle, startSquare);
 
             channelRef.current?.send({
               type: 'broadcast',
               event: 'draw_annotation',
-              payload: { kind: 'circle', square: startSquare, visible }
+              payload: { kind: 'circle', square: startSquare, visible },
             });
           } else {
-            const existing = chessboardInstance.current.getArrows(ARROW_TYPE.default, startSquare, endSquare);
+            const existing = chessboardInstance.current.getArrows(
+              ARROW_TYPE.default,
+              startSquare,
+              endSquare
+            );
             const visible = existing.length === 0;
-            if (visible) chessboardInstance.current.addArrow(ARROW_TYPE.default, startSquare, endSquare);
-            else chessboardInstance.current.removeArrows(ARROW_TYPE.default, startSquare, endSquare);
+            if (visible)
+              chessboardInstance.current.addArrow(ARROW_TYPE.default, startSquare, endSquare);
+            else
+              chessboardInstance.current.removeArrows(
+                ARROW_TYPE.default,
+                startSquare,
+                endSquare
+              );
 
             channelRef.current?.send({
               type: 'broadcast',
               event: 'draw_annotation',
-              payload: { kind: 'arrow', from: startSquare, to: endSquare, visible }
+              payload: { kind: 'arrow', from: startSquare, to: endSquare, visible },
             });
           }
         }
@@ -1182,7 +1313,9 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   }, [isTeacher, editorTurn, editorCastling]);
 
   const copyInviteLink = () => {
-    const inviteUrl = `${window.location.origin}?room=${lesson?.students?.id || lesson?.id || ''}`;
+    const inviteUrl = lesson?.isGroup
+      ? `${window.location.origin}/?room=group-${lesson.id}`
+      : `${window.location.origin}/?room=room-${lesson?.students?.id || lesson?.id || ''}`;
     navigator.clipboard.writeText(inviteUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -1207,10 +1340,10 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     collectBranch(nodeId);
 
     const nextTree = { ...activeTree };
-    idsToDelete.forEach(id => delete nextTree[id]);
+    idsToDelete.forEach((id) => delete nextTree[id]);
     nextTree[parentNode.id] = {
       ...parentNode,
-      children: (parentNode.children || []).filter(id => id !== nodeId)
+      children: (parentNode.children || []).filter((id) => id !== nodeId),
     };
 
     const nextCurrentId = idsToDelete.has(currentIdRef.current)
@@ -1227,12 +1360,12 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       gameRef.current.load(nextCurrentNode.fen, { skipValidation: true });
       chessboardInstance.current?.setPosition(nextCurrentNode.fen, true);
     } catch (error) {
-      console.error('Navigation error after deleting move:', error);
+      console.error('Ошибка навигации после удаления хода:', error);
     }
 
     saveState(nextCurrentNode.fen, canStudentMoveRef.current, {
       moveTree: nextTree,
-      currentNodeId: nextCurrentNode.id
+      currentNodeId: nextCurrentNode.id,
     });
 
     channelRef.current?.send({
@@ -1241,15 +1374,17 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       payload: {
         fen: nextCurrentNode.fen,
         moveTree: nextTree,
-        currentNodeId: nextCurrentNode.id
-      }
+        currentNodeId: nextCurrentNode.id,
+      },
     });
   };
 
   const renderMoveNotation = () => {
     const rootNode = tree.root;
     if (!rootNode || !rootNode.children?.length) {
-      return <div className="p-4 text-center text-xs text-gray-400 font-sans">No moves yet</div>;
+      return (
+        <div className="p-4 text-center text-xs text-gray-400 font-sans">Пока нет ходов</div>
+      );
     }
 
     const rootFenParts = (rootNode.fen || '').split(' ');
@@ -1259,15 +1394,17 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
     const moveControl = (node, ply, isFirstInLine = false) => {
       const moveNumber = Math.floor(ply / 2) + 1;
-      const prefix = ply % 2 === 0 ? `${moveNumber}.` : (isFirstInLine ? `${moveNumber}...` : '');
+      const prefix = ply % 2 === 0 ? `${moveNumber}.` : isFirstInLine ? `${moveNumber}...` : '';
       const selected = currentId === node.id;
-      const className = `inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-[12px] leading-none font-semibold transition ${selected
-        ? 'bg-blue-600 text-white shadow-sm'
-        : 'text-slate-800 hover:bg-slate-200'}`;
+      const className = `inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-[12px] leading-none font-semibold transition ${
+        selected ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-800 hover:bg-slate-200'
+      }`;
 
       const content = (
         <>
-          {prefix && <span className={selected ? 'text-blue-100' : 'text-gray-400'}>{prefix}</span>}
+          {prefix && (
+            <span className={selected ? 'text-blue-100' : 'text-gray-400'}>{prefix}</span>
+          )}
           <span>{formatSanWithIcons(node.san)}</span>
         </>
       );
@@ -1277,13 +1414,15 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           key={node.id}
           onClick={() => jumpToNode(node.id)}
           onContextMenu={(event) => deleteMoveBranch(node.id, event)}
-          title="Right-click — delete this move and continuation"
+          title="Правый клик — удалить ход и продолжение"
           className={`${className} cursor-pointer`}
         >
           {content}
         </button>
       ) : (
-        <span key={node.id} className={className}>{content}</span>
+        <span key={node.id} className={className}>
+          {content}
+        </span>
       );
     };
 
@@ -1299,7 +1438,9 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         const node = tree[nodeId];
         items.push(moveControl(node, ply, firstInLine));
 
-        const alternatives = (tree[node.parentId]?.children || []).filter(id => id !== nodeId);
+        const alternatives = (tree[node.parentId]?.children || []).filter(
+          (id) => id !== nodeId
+        );
         const isMainChoice = tree[node.parentId]?.children?.[0] === nodeId;
 
         if (isMainChoice && alternatives.length > 0) {
@@ -1307,9 +1448,11 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             items.push(
               <div
                 key={`variation-${node.parentId}-${alternativeId}-${index}`}
-                className={`basis-full w-full my-1 py-1.5 pr-1 rounded-r-lg border-l-2 ${depth === 0
-                  ? 'pl-2 bg-amber-50/80 border-amber-400'
-                  : 'pl-2 bg-slate-100 border-slate-300'}`}
+                className={`basis-full w-full my-1 py-1.5 pr-1 rounded-r-lg border-l-2 ${
+                  depth === 0
+                    ? 'pl-2 bg-amber-50/80 border-amber-400'
+                    : 'pl-2 bg-slate-100 border-slate-300'
+                }`}
               >
                 <div className="flex flex-wrap items-center gap-0.5">
                   <span className="text-[10px] text-gray-400 mr-0.5">↳</span>
@@ -1335,8 +1478,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     );
   };
 
-  if (!lesson) return <div className="p-8 text-center text-gray-500">No lesson selected</div>;
-
+  if (!lesson) return <div className="p-8 text-center text-gray-500">Урок не выбран</div>;
   return (
     <div className="min-h-[calc(100vh-7rem)] bg-slate-100">
       {isTeacher && isMaterialsOpen && (
@@ -1348,14 +1490,16 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       {pendingPromotion && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/45 p-4">
           <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl">
-            <h3 className="text-center text-base font-extrabold text-slate-900">Choose a Piece</h3>
-            <p className="mt-1 text-center text-xs text-slate-500">Pawn Promotion</p>
+            <h3 className="text-center text-base font-extrabold text-slate-900">
+              Выберите фигуру
+            </h3>
+            <p className="mt-1 text-center text-xs text-slate-500">Превращение пешки</p>
             <div className="mt-4 grid grid-cols-4 gap-2">
               {[
-                { type: 'q', white: '♕', black: '♛', label: 'Queen' },
-                { type: 'r', white: '♖', black: '♜', label: 'Rook' },
-                { type: 'b', white: '♗', black: '♝', label: 'Bishop' },
-                { type: 'n', white: '♘', black: '♞', label: 'Knight' }
+                { type: 'q', white: '♕', black: '♛', label: 'Ферзь' },
+                { type: 'r', white: '♖', black: '♜', label: 'Ладья' },
+                { type: 'b', white: '♗', black: '♝', label: 'Слон' },
+                { type: 'n', white: '♘', black: '♞', label: 'Конь' },
               ].map((piece) => (
                 <button
                   key={piece.type}
@@ -1373,7 +1517,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
               onClick={() => setPendingPromotion(null)}
               className="mt-3 w-full rounded-xl bg-slate-100 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-200 cursor-pointer"
             >
-              Cancel
+              Отмена
             </button>
           </div>
         </div>
@@ -1382,18 +1526,32 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         <section className="flex flex-col gap-3 min-w-0">
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-amber-400 flex items-center justify-center text-xl shadow-sm shrink-0">🐝</div>
+              <div className="w-10 h-10 rounded-xl bg-amber-400 flex items-center justify-center text-xl shadow-sm shrink-0">
+                🐝
+              </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-lg font-black tracking-tight text-slate-900">bee<span className="text-amber-500">chess</span></span>
+                  <span className="text-lg font-black tracking-tight text-slate-900">
+                    bee<span className="text-amber-500">chess</span>
+                  </span>
                   <span className="text-gray-300">/</span>
-                  <h2 className="text-sm font-bold text-gray-800 truncate">{lesson.title || 'Chess Lesson'}</h2>
+                  <h2 className="text-sm font-bold text-gray-800 truncate">
+                    {lesson.title || 'Шахматный урок'}
+                  </h2>
                 </div>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span className={`w-2 h-2 rounded-full ${canStudentMove ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-                <span className="text-[11px] text-gray-500">
-                    {isObserver ? 'Observer mode — controls disabled' : canStudentMove ? 'Student can move' : 'Student moves are locked'}
-                </span>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      canStudentMove ? 'bg-emerald-500' : 'bg-slate-400'
+                    }`}
+                  />
+                  <span className="text-[11px] text-gray-500">
+                    {isObserver
+                      ? 'Режим наблюдателя — управление отключено'
+                      : canStudentMove
+                      ? 'Ученик может ходить'
+                      : 'Ходы ученика заблокированы'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -1405,13 +1563,17 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                     onClick={() => setIsMaterialsOpen(true)}
                     className="px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-xs font-bold transition cursor-pointer"
                   >
-                    📚 Materials
+                    📚 Материалы
                   </button>
                   <button
                     onClick={toggleStudentAccess}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${canStudentMove ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      canStudentMove
+                        ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                    }`}
                   >
-                    {canStudentMove ? '🔒 Lock Moves' : '🟢 Allow Moves'}
+                    {canStudentMove ? '🔒 Запретить ходы' : '🟢 Разрешить ходы'}
                   </button>
                 </>
               )}
@@ -1420,7 +1582,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                   onClick={copyInviteLink}
                   className="px-3 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-xs font-semibold text-gray-700 cursor-pointer"
                 >
-                  {copied ? '✓ Copied' : '🔗 Link'}
+                  {copied ? '✓ Скопировано' : '🔗 Ссылка'}
                 </button>
               )}
             </div>
@@ -1430,10 +1592,20 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             {isTeacher && loadedMaterial && (
               <div className="flex w-full max-w-[660px] items-center justify-between gap-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2">
                 <div className="min-w-0">
-                  <p className="truncate text-xs font-bold text-blue-900">📘 {loadedMaterial.topic}</p>
-                  <p className="text-[10px] text-blue-600">Position {loadedMaterial.position_order} · {loadedMaterial.module}</p>
+                  <p className="truncate text-xs font-bold text-blue-900">
+                    📘 {loadedMaterial.topic}
+                  </p>
+                  <p className="text-[10px] text-blue-600">
+                    Позиция {loadedMaterial.position_order} · {loadedMaterial.module}
+                  </p>
                 </div>
-                <button type="button" onClick={() => setLoadedMaterial(null)} className="shrink-0 text-xs font-bold text-blue-500 hover:text-blue-700 cursor-pointer">✕</button>
+                <button
+                  type="button"
+                  onClick={() => setLoadedMaterial(null)}
+                  className="shrink-0 text-xs font-bold text-blue-500 hover:text-blue-700 cursor-pointer"
+                >
+                  ✕
+                </button>
               </div>
             )}
             <div
@@ -1443,7 +1615,9 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                 if (isEditorMode) event.preventDefault();
               }}
               onDrop={handlePaletteDrop}
-              className={`w-full max-w-[660px] aspect-square rounded-xl border border-gray-200 overflow-hidden shadow-inner select-none ${isEditorMode ? 'cursor-crosshair ring-2 ring-blue-500' : 'cursor-pointer'}`}
+              className={`w-full max-w-[660px] aspect-square rounded-xl border border-gray-200 overflow-hidden shadow-inner select-none ${
+                isEditorMode ? 'cursor-crosshair ring-2 ring-blue-500' : 'cursor-pointer'
+              }`}
             />
 
             {isTeacher && (
@@ -1462,136 +1636,167 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                     setIsEditorMode(nextMode);
                     setSelectedEditorPiece(null);
                   }}
-                  className={`py-2 rounded-xl text-xs font-bold cursor-pointer ${isEditorMode ? 'bg-blue-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
+                  className={`py-2 rounded-xl text-xs font-bold cursor-pointer ${
+                    isEditorMode
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                  }`}
                 >
-                  ⚙️ Position Editor
+                  ⚙️ Редактор позиции
                 </button>
                 <button
                   onClick={toggleBoardOrientation}
                   className="py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
                 >
-                  🔄 Flip Board
+                  🔄 Перевернуть доску
                 </button>
                 <div className="hidden sm:flex items-center justify-center rounded-xl bg-amber-50 text-amber-800 text-[11px] font-medium px-2">
-                  Right-click: circles and arrows
+                  ПКМ: круги и стрелки
                 </div>
               </div>
             )}
           </div>
 
-        {isTeacher && isEditorMode && (
-          <div className="w-full bg-blue-50/90 border border-blue-200 p-4 rounded-2xl shadow-sm flex flex-col gap-3">
-            <div className="flex justify-between items-center text-xs font-bold text-blue-900">
-              <span>⚙️ Position Editor (Free Drag & Drop)</span>
-              <button onClick={() => setIsEditorMode(false)} className="text-red-600 hover:underline cursor-pointer">Cancel</button>
-            </div>
-
-            <div className="text-[11px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-medium text-center">
-              Drag pieces with the mouse, place them by clicking the palette, or remove them with **Ctrl + right-click**.
-            </div>
-
-            <div className="grid grid-cols-6 gap-1">
-              {PIECES_PALETTE.map(item => (
+          {isTeacher && isEditorMode && (
+            <div className="w-full bg-blue-50/90 border border-blue-200 p-4 rounded-2xl shadow-sm flex flex-col gap-3">
+              <div className="flex justify-between items-center text-xs font-bold text-blue-900">
+                <span>⚙️ Редактор позиции (перетаскивание)</span>
                 <button
-                  key={item.piece}
-                  type="button"
-                  draggable
-                  onDragStart={(event) => {
-                    event.dataTransfer.effectAllowed = 'copy';
-                    event.dataTransfer.setData('application/x-beechess-piece', item.fenChar);
-                    setSelectedEditorPiece(item.piece);
-                  }}
-                  onClick={() => setSelectedEditorPiece(item.piece)}
-                  title={`${item.name}: drag onto the board or select with a click`}
-                  className={`flex aspect-square items-center justify-center rounded border bg-white p-0.5 cursor-grab active:cursor-grabbing hover:bg-gray-100 ${selectedEditorPiece === item.piece ? 'border-blue-600 ring-2 ring-blue-400' : 'border-gray-200'}`}
+                  onClick={() => setIsEditorMode(false)}
+                  className="text-red-600 hover:underline cursor-pointer"
                 >
-                  <ChessPieceIcon piece={item.piece} className="h-[82%] w-[82%]" />
+                  Отмена
                 </button>
-              ))}
-            </div>
-
-            <div className="flex flex-col gap-1.5 bg-white p-2 rounded-lg border border-blue-100 text-[11px]">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-gray-700">Side to move:</span>
-                <select
-                  value={editorTurn}
-                  onChange={(e) => {
-                    const newT = e.target.value;
-                    setEditorTurn(newT);
-                    handleUpdateEditorSettings(newT, editorCastling);
-                  }}
-                  className="border border-gray-300 rounded px-1.5 py-0.5 bg-white font-medium cursor-pointer"
-                >
-                  <option value="w">White</option>
-                  <option value="b">Black</option>
-                </select>
               </div>
 
-              <div className="flex flex-col gap-1">
-                <span className="font-semibold text-gray-700">Castling rights:</span>
-                <div className="flex flex-wrap gap-2.5">
-                  {[
-                    { label: 'White O-O (K)', char: 'K' },
-                    { label: 'White O-O-O (Q)', char: 'Q' },
-                    { label: 'Black O-O (k)', char: 'k' },
-                    { label: 'Black O-O-O (q)', char: 'q' }
-                  ].map(({ label, char }) => {
-                    const isChecked = editorCastling.includes(char);
-                    return (
-                      <label key={char} className="flex items-center gap-1 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            let nextC = editorCastling.replace('-', '');
-                            if (e.target.checked) {
-                              if (!nextC.includes(char)) nextC += char;
-                            } else {
-                              nextC = nextC.replace(char, '');
-                            }
-                            const finalC = nextC || '-';
-                            setEditorCastling(finalC);
-                            handleUpdateEditorSettings(editorTurn, finalC);
-                          }}
-                        />
-                        {label}
-                      </label>
-                    );
-                  })}
+              <div className="text-[11px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-medium text-center">
+                Перетаскивайте фигуры мышью, ставьте их кликом по палитре, а удаляйте сочетанием{' '}
+                <strong>Ctrl + ПКМ</strong>.
+              </div>
+
+              <div className="grid grid-cols-6 gap-1">
+                {PIECES_PALETTE.map((item) => (
+                  <button
+                    key={item.piece}
+                    type="button"
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = 'copy';
+                      event.dataTransfer.setData('application/x-beechess-piece', item.fenChar);
+                      setSelectedEditorPiece(item.piece);
+                    }}
+                    onClick={() => setSelectedEditorPiece(item.piece)}
+                    title={`${item.name}: перетащите на доску или выберите кликом`}
+                    className={`flex aspect-square items-center justify-center rounded border bg-white p-0.5 cursor-grab active:cursor-grabbing hover:bg-gray-100 ${
+                      selectedEditorPiece === item.piece
+                        ? 'border-blue-600 ring-2 ring-blue-400'
+                        : 'border-gray-200'
+                    }`}
+                  >
+                    <ChessPieceIcon piece={item.piece} className="h-[82%] w-[82%]" />
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-col gap-1.5 bg-white p-2 rounded-lg border border-blue-100 text-[11px]">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-gray-700">Чей ход:</span>
+                  <select
+                    value={editorTurn}
+                    onChange={(e) => {
+                      const newT = e.target.value;
+                      setEditorTurn(newT);
+                      handleUpdateEditorSettings(newT, editorCastling);
+                    }}
+                    className="border border-gray-300 rounded px-1.5 py-0.5 bg-white font-medium cursor-pointer"
+                  >
+                    <option value="w">Белые</option>
+                    <option value="b">Чёрные</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="font-semibold text-gray-700">Права на рокировку:</span>
+                  <div className="flex flex-wrap gap-2.5">
+                    {[
+                      { label: 'Белые O-O (K)', char: 'K' },
+                      { label: 'Белые O-O-O (Q)', char: 'Q' },
+                      { label: 'Чёрные O-O (k)', char: 'k' },
+                      { label: 'Чёрные O-O-O (q)', char: 'q' },
+                    ].map(({ label, char }) => {
+                      const isChecked = editorCastling.includes(char);
+                      return (
+                        <label
+                          key={char}
+                          className="flex items-center gap-1 cursor-pointer select-none"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              let nextC = editorCastling.replace('-', '');
+                              if (e.target.checked) {
+                                if (!nextC.includes(char)) nextC += char;
+                              } else {
+                                nextC = nextC.replace(char, '');
+                              }
+                              const finalC = nextC || '-';
+                              setEditorCastling(finalC);
+                              handleUpdateEditorSettings(editorTurn, finalC);
+                            }}
+                          />
+                          {label}
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="flex gap-2">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedEditorPiece(null)}
+                  className={`flex-1 py-1 text-[11px] font-semibold rounded border cursor-pointer ${
+                    selectedEditorPiece === null
+                      ? 'bg-red-600 text-white border-red-600'
+                      : 'bg-white text-red-600 border-gray-200'
+                  }`}
+                >
+                  🗑️ Ластик (или Ctrl + ПКМ)
+                </button>
+                <button
+                  onClick={handleClearBoard}
+                  className="px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-700 hover:bg-gray-100 cursor-pointer"
+                >
+                  Очистить доску
+                </button>
+                <button
+                  onClick={handleResetEditor}
+                  className="px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-700 hover:bg-gray-100 cursor-pointer"
+                >
+                  Начальная позиция
+                </button>
+              </div>
+
               <button
-                onClick={() => setSelectedEditorPiece(null)}
-                className={`flex-1 py-1 text-[11px] font-semibold rounded border cursor-pointer ${selectedEditorPiece === null ? 'bg-red-600 text-white border-red-600' : 'bg-white text-red-600 border-gray-200'}`}
+                onClick={handleSaveEditorPosition}
+                className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition shadow-sm cursor-pointer"
               >
-                🗑️ Eraser (or Ctrl + right-click)
-              </button>
-              <button onClick={handleClearBoard} className="px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-700 hover:bg-gray-100 cursor-pointer">
-                Clear Board
-              </button>
-              <button onClick={handleResetEditor} className="px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-700 hover:bg-gray-100 cursor-pointer">
-                Starting Position
+                💾 Сохранить позицию (применить и начать запись ходов)
               </button>
             </div>
-
-            <button
-              onClick={handleSaveEditorPosition}
-              className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition shadow-sm cursor-pointer"
-            >
-              💾 Save Position (apply and start recording moves)
-            </button>
-          </div>
-        )}
+          )}
 
         </section>
 
         <section className="bg-white p-3 rounded-2xl border border-gray-200 shadow-sm flex flex-col h-[420px] xl:h-[calc(100vh-7rem)] xl:max-h-[760px] xl:min-h-[520px] font-mono select-none xl:sticky xl:top-20 min-w-0">
           <div className="flex justify-between items-center mb-2 px-1 gap-2">
-            <h3 className="font-bold text-gray-900 text-sm font-sans whitespace-nowrap">📋 Move List</h3>
-            {isTeacher && <span className="text-[9px] text-gray-400 font-sans text-right">← → navigate<br />Right-click — delete</span>}
+            <h3 className="font-bold text-gray-900 text-sm font-sans whitespace-nowrap">📋 Список ходов</h3>
+            {isTeacher && (
+              <span className="text-[9px] text-gray-400 font-sans text-right">
+                ← → навигация<br />ПКМ — удалить
+              </span>
+            )}
           </div>
           <div className="flex-1 overflow-y-auto border border-gray-100 rounded-xl bg-white">
             {renderMoveNotation()}
@@ -1603,14 +1808,14 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                 disabled={!tree[currentId]?.parentId}
                 className="py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-lg text-xs font-bold cursor-pointer font-sans"
               >
-                ‹ Back
+                ‹ Назад
               </button>
               <button
                 onClick={() => tree[currentId]?.children?.[0] && jumpToNode(tree[currentId].children[0])}
                 disabled={!tree[currentId]?.children?.length}
                 className="py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-lg text-xs font-bold cursor-pointer font-sans"
               >
-                Forward ›
+                Вперёд ›
               </button>
             </div>
           )}
@@ -1620,49 +1825,94 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           <div className="bg-white p-3 rounded-2xl border border-gray-200 shadow-sm">
             <div className="flex justify-between items-center px-1 mb-2">
               <div>
-                <h3 className="font-bold text-gray-900 text-sm">📹 Video Lesson</h3>
-                <p className="text-[10px] text-gray-400">Secure beeChess room</p>
+                <h3 className="font-bold text-gray-900 text-sm">📹 Видеоурок</h3>
+                <p className="text-[10px] text-gray-400">Защищённая комната beeChess</p>
               </div>
-              <button onClick={() => setIsVideoOpen(!isVideoOpen)} className="text-xs text-blue-600 font-semibold cursor-pointer">
-                {isVideoOpen ? 'Collapse' : 'Expand'}
+              <button
+                onClick={() => setIsVideoOpen(!isVideoOpen)}
+                className="text-xs text-blue-600 font-semibold cursor-pointer"
+              >
+                {isVideoOpen ? 'Свернуть' : 'Развернуть'}
               </button>
             </div>
             {isVideoOpen ? (
               <div className="w-full h-[260px] lg:h-[280px] xl:h-[340px] 2xl:h-[380px] bg-gray-900 rounded-xl overflow-hidden border border-gray-200">
-                <VideoRoom lesson={lesson} isObserver={isObserver} />
+                <VideoRoom lesson={lesson} isObserver={isObserver} isTeacher={isTeacher} />
               </div>
             ) : (
-              <div className="h-20 flex items-center justify-center bg-slate-50 rounded-xl text-xs text-gray-500">Video collapsed</div>
+              <div className="h-20 flex items-center justify-center bg-slate-50 rounded-xl text-xs text-gray-500">
+                Видео свёрнуто
+              </div>
             )}
           </div>
 
           <div className="bg-white p-3 rounded-2xl border border-gray-200 shadow-sm font-mono select-none">
             <div className="grid grid-cols-2 gap-2">
-              <div className={`px-3 py-2.5 rounded-xl transition-all ${activeColor === 'w' && clockStarted ? 'bg-amber-50 text-gray-900 ring-2 ring-amber-400' : 'bg-slate-100 text-gray-700'}`}>
-                <div className="text-[10px] font-sans font-bold text-gray-500 mb-0.5">⬜ WHITE</div>
-                <span ref={whiteClockDomRef} className="text-xl font-black tracking-wider">{formatTime(timerW)}</span>
+              <div
+                className={`px-3 py-2.5 rounded-xl transition-all ${
+                  activeColor === 'w' && clockStarted
+                    ? 'bg-amber-50 text-gray-900 ring-2 ring-amber-400'
+                    : 'bg-slate-100 text-gray-700'
+                }`}
+              >
+                <div className="text-[10px] font-sans font-bold text-gray-500 mb-0.5">⬜ БЕЛЫЕ</div>
+                <span ref={whiteClockDomRef} className="text-xl font-black tracking-wider">
+                  {formatTime(timerW)}
+                </span>
               </div>
-              <div className={`px-3 py-2.5 rounded-xl transition-all ${activeColor === 'b' && clockStarted ? 'bg-slate-900 text-white ring-2 ring-amber-400' : 'bg-slate-100 text-gray-700'}`}>
-                <div className={`text-[10px] font-sans font-bold mb-0.5 ${activeColor === 'b' && clockStarted ? 'text-gray-300' : 'text-gray-500'}`}>⬛ BLACK</div>
-                <span ref={blackClockDomRef} className="text-xl font-black tracking-wider">{formatTime(timerB)}</span>
+              <div
+                className={`px-3 py-2.5 rounded-xl transition-all ${
+                  activeColor === 'b' && clockStarted
+                    ? 'bg-slate-900 text-white ring-2 ring-amber-400'
+                    : 'bg-slate-100 text-gray-700'
+                }`}
+              >
+                <div
+                  className={`text-[10px] font-sans font-bold mb-0.5 ${
+                    activeColor === 'b' && clockStarted ? 'text-gray-300' : 'text-gray-500'
+                  }`}
+                >
+                  ⬛ ЧЁРНЫЕ
+                </div>
+                <span ref={blackClockDomRef} className="text-xl font-black tracking-wider">
+                  {formatTime(timerB)}
+                </span>
               </div>
             </div>
 
             {isTeacher && (
               <div className="grid grid-cols-4 gap-1.5 mt-2 text-[11px] font-sans">
-                <button onClick={() => setTimeControl(3, 2)} className="py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg font-bold cursor-pointer">3+2</button>
-                <button onClick={() => setTimeControl(10, 5)} className="py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg font-bold cursor-pointer">10+5</button>
-                <button onClick={() => setTimeControl(30, 15)} className="py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg font-bold cursor-pointer">30+15</button>
+                <button
+                  onClick={() => setTimeControl(3, 2)}
+                  className="py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg font-bold cursor-pointer"
+                >
+                  3+2
+                </button>
+                <button
+                  onClick={() => setTimeControl(10, 5)}
+                  className="py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg font-bold cursor-pointer"
+                >
+                  10+5
+                </button>
+                <button
+                  onClick={() => setTimeControl(30, 15)}
+                  className="py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg font-bold cursor-pointer"
+                >
+                  30+15
+                </button>
                 <button
                   onClick={toggleClockStart}
-                  className={`py-1.5 rounded-lg font-bold text-white cursor-pointer ${clockStarted ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+                  className={`py-1.5 rounded-lg font-bold text-white cursor-pointer ${
+                    clockStarted
+                      ? 'bg-red-600 hover:bg-red-700'
+                      : 'bg-emerald-600 hover:bg-emerald-700'
+                  }`}
                 >
-                  {clockStarted ? 'Stop' : 'Start'}
+                  {clockStarted ? 'Стоп' : 'Старт'}
                 </button>
               </div>
             )}
           </div>
-
         </aside>
       </div>
     </div>

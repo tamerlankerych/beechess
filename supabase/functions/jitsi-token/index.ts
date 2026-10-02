@@ -37,19 +37,19 @@ Deno.serve(async (request) => {
     if (profileError || !profile) throw new Error('Профиль пользователя не найден');
 
     const { roomName } = await request.json();
-    if (typeof roomName !== 'string' || !/^chess-lesson-[0-9a-f-]{36}$/i.test(roomName)) {
+    if (typeof roomName !== 'string' || roomName.length < 5) {
       throw new Error('Некорректная комната');
     }
 
     const role = String(profile.role || '').trim().toLowerCase();
-    const isTeacher = role === 'teacher';
-    const isStudent = role === 'student';
-    const isAdmin = role === 'admin';
-    if (!isTeacher && !isStudent && !isAdmin) throw new Error('Нет доступа к видеозвонку');
-
-    if (isStudent && roomName !== `chess-lesson-${user.id}`) {
-      throw new Error('Ученик не имеет доступа к этой комнате');
+    const allowedRoles = ['teacher', 'student', 'admin', 'crm_admin'];
+    if (!allowedRoles.includes(role)) {
+      throw new Error('Нет доступа к видеозвонку');
     }
+
+    // Модератор — только тренер и суперадмин.
+    // crm_admin не работает с уроками, поэтому не модератор.
+    const isModerator = role === 'teacher' || role === 'admin';
 
     const privateKeyPem = Deno.env.get('JAAS_PRIVATE_KEY')?.replace(/\\n/g, '\n');
     if (!privateKeyPem) throw new Error('На сервере не настроен JAAS_PRIVATE_KEY');
@@ -65,18 +65,18 @@ Deno.serve(async (request) => {
       context: {
         user: {
           id: user.id,
-          name: profile.name || user.email || (isTeacher ? 'Тренер' : isAdmin ? 'Администратор' : 'Ученик'),
+          name: profile.name || user.email || 'Участник',
           email: user.email || '',
-          moderator: String(isTeacher)
+          moderator: isModerator,
         },
         features: {
           livestreaming: false,
           recording: false,
           transcription: false,
-          'outbound-call': false
+          'outbound-call': false,
         },
-        room: { regex: false }
-      }
+        room: { regex: false },
+      },
     })
       .setProtectedHeader({ alg: 'RS256', kid: KEY_ID, typ: 'JWT' })
       .setNotBefore(now - 10)

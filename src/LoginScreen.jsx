@@ -19,10 +19,7 @@ export const LoginScreen = () => {
       });
 
       if (authError) throw authError;
-
-      // Role и активную вкладку определяет App.jsx через onAuthStateChange
-      // (fetchUserRole). Дублировать запрос здесь не нужно — это убирает
-      // гонку состояний между двумя источниками роли и лишний запрос к БД.
+      // Роль и активную вкладку определяет App.jsx через onAuthStateChange.
     } catch (err) {
       setError(err.message);
       setLoading(false);
@@ -41,25 +38,25 @@ export const LoginScreen = () => {
 
         {error && (
           <div className="mb-4 p-3 bg-red-50 text-red-600 text-xs rounded-lg">
-            Sign-in error: {error}
+            Ошибка входа: {error}
           </div>
         )}
 
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Электронная почта</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="tamerkross@gmail.com"
+              placeholder="you@example.com"
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-600"
               required
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Password</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Пароль</label>
             <input
               type="password"
               value={password}
@@ -75,7 +72,7 @@ export const LoginScreen = () => {
             disabled={loading}
             className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-sm cursor-pointer disabled:opacity-50 transition"
           >
-            {loading ? 'Signing in...' : 'Sign In'}
+            {loading ? 'Входим...' : 'Войти'}
           </button>
         </form>
       </div>
