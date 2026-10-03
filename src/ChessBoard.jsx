@@ -144,6 +144,27 @@ const formatTime = (ms) => {
   return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 };
 
+// ============================================================
+// Вспомогательная: сравнение FEN по "номеру полухода"
+// Возвращает true, если newFen НЕ старее текущего fen
+// ============================================================
+const isFenNotOlder = (currentFen, newFen) => {
+  try {
+    const c = currentFen.split(' ');
+    const n = newFen.split(' ');
+
+    const cFull = parseInt(c[5] || '1', 10);
+    const nFull = parseInt(n[5] || '1', 10);
+
+    const currentNum = cFull * 2 + (c[1] === 'b' ? 1 : 0);
+    const newNum = nFull * 2 + (n[1] === 'b' ? 1 : 0);
+
+    return newNum >= currentNum;
+  } catch {
+    return true;
+  }
+};
+
 export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson }) => {
   const boardRef = useRef(null);
   const chessboardInstance = useRef(null);
@@ -226,7 +247,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     editorCastling,
   ]);
 
-  // ИСПРАВЛЕНО: зависимость по lesson?.id, а не по объекту lesson
+  // ИСПРАВЛЕНО: debounce 5 секунд вместо 3
   const saveState = useCallback(
     async (fen, studentCanMove, sharedState = {}) => {
       if (!lesson?.id) return;
@@ -265,12 +286,11 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         } catch (e) {
           console.error('Ошибка сохранения состояния:', e);
         }
-      }, 3000);
+      }, 5000);
     },
     [lesson?.id, lesson?.title]
   );
 
-  // ИСПРАВЛЕНО: теперь шлём broadcast при переключении
   const toggleStudentAccess = () => {
     const nextState = !canStudentMove;
     setCanStudentMove(nextState);
@@ -894,13 +914,18 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             setTree(payload.new.move_tree);
             setCurrentId(syncedCurrentId);
           }
+
+          // ИСПРАВЛЕНО: не откатываем доску, если FEN из БД старее текущего
           if (payload.new.fen && payload.new.fen !== gameRef.current.fen()) {
-            try {
-              gameRef.current.load(payload.new.fen, { skipValidation: true });
-              if (chessboardInstance.current)
-                chessboardInstance.current.setPosition(payload.new.fen, true);
-            } catch {
-              // Некорректное внешнее состояние игнорируем.
+            const currentFen = gameRef.current.fen();
+            if (isFenNotOlder(currentFen, payload.new.fen)) {
+              try {
+                gameRef.current.load(payload.new.fen, { skipValidation: true });
+                if (chessboardInstance.current)
+                  chessboardInstance.current.setPosition(payload.new.fen, true);
+              } catch {
+                // Некорректное внешнее состояние игнорируем
+              }
             }
           }
         }
@@ -941,9 +966,13 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             }
           }
         } else if (payload.fen) {
-          gameRef.current.load(payload.fen, { skipValidation: true });
-          if (chessboardInstance.current)
-            chessboardInstance.current.setPosition(payload.fen, true);
+          // Тоже проверяем на устаревание
+          const currentFen = gameRef.current.fen();
+          if (isFenNotOlder(currentFen, payload.fen)) {
+            gameRef.current.load(payload.fen, { skipValidation: true });
+            if (chessboardInstance.current)
+              chessboardInstance.current.setPosition(payload.fen, true);
+          }
           if (payload.moveTree?.root) {
             const syncedCurrentId = payload.moveTree[payload.currentNodeId]
               ? payload.currentNodeId
@@ -978,7 +1007,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           setClockStarted(payload.clockStarted);
         }
       })
-      // НОВЫЙ слушатель для разблокировки ходов
       .on('broadcast', { event: 'student_access' }, ({ payload }) => {
         if (!payload) return;
         if (payload.canStudentMove !== undefined) {
@@ -1242,7 +1270,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             setTempEditorFen(fullUpdatedFen);
             chessboardInstance.current.setPosition(fullUpdatedFen, false);
           } catch {
-            // Если редактирование не удалось, оставляем текущую позицию.
+            // Если редактирование не удалось, оставляем текущую позицию
           }
         } else if (!isEditorModeRef.current && startSquare && endSquare) {
           if (startSquare === endSquare) {
