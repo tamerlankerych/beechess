@@ -513,7 +513,6 @@ const GroupsTab = ({ userId, onOpenGroupRoom }) => {
     </div>
   );
 };
-
 /* ============================================================
    Вкладка: Расписание
    ============================================================ */
@@ -632,14 +631,22 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
     return arr;
   }, [weekStart]);
 
+  // ЛОКАЛЬНАЯ дата в формате YYYY-MM-DD (без UTC сдвига)
+  const toLocalDateKey = (dateInput) => {
+    const d = new Date(dateInput);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
   const lessonsByDay = useMemo(() => {
     const map = {};
     days.forEach((d) => {
-      const key = d.toISOString().slice(0, 10);
-      map[key] = [];
+      map[toLocalDateKey(d)] = [];
     });
     lessons.forEach((l) => {
-      const key = new Date(l.starts_at).toISOString().slice(0, 10);
+      const key = toLocalDateKey(l.starts_at);
       if (map[key]) map[key].push(l);
     });
     Object.values(map).forEach((arr) =>
@@ -802,7 +809,7 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-2">
           {days.map((day) => {
-            const key = day.toISOString().slice(0, 10);
+            const key = toLocalDateKey(day);
             const dayLessons = lessonsByDay[key] || [];
             const isToday = new Date().toDateString() === day.toDateString();
 
@@ -917,7 +924,6 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
     </div>
   );
 };
-
 /* ============================================================
    Модалка: создание урока
    ============================================================ */
@@ -935,8 +941,12 @@ const WEEKDAYS = [
 ];
 
 const pad2 = (n) => String(n).padStart(2, '0');
+
+// JS getDay(): Вс=0, Пн=1 ... Сб=6
+// Наш idx:    Пн=0, Вт=1 ... Вс=6
 const jsDayToOurIdx = (jsDay) => (jsDay === 0 ? 6 : jsDay - 1);
 
+// Формат YYYY-MM-DD в ЛОКАЛЬНОМ часовом поясе
 const dateToInputValue = (date) => {
   const d = new Date(date);
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -998,6 +1008,7 @@ const LessonEditor = ({
   const [selectedStudentIds, setSelectedStudentIds] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState('');
 
+  // Дата в формате YYYY-MM-DD (локальная)
   const [startDate, setStartDate] = useState(dateToInputValue(baseDate));
   const [startHour, setStartHour] = useState(baseDate.getHours());
   const [startMinute, setStartMinute] = useState(0);
@@ -1015,8 +1026,10 @@ const LessonEditor = ({
 
   useEffect(() => {
     if (recurringMode === 'weekly' && recurringDays.length === 0 && startDate) {
-      const d = new Date(startDate);
-      setRecurringDays([jsDayToOurIdx(d.getDay())]);
+      // startDate: "YYYY-MM-DD" — парсим как локальную дату
+      const [y, m, d] = startDate.split('-').map(Number);
+      const localDate = new Date(y, m - 1, d);
+      setRecurringDays([jsDayToOurIdx(localDate.getDay())]);
     }
   }, [recurringMode, startDate, recurringDays.length]);
 
@@ -1072,25 +1085,49 @@ const LessonEditor = ({
     );
   };
 
+  // ============================================================
+  // ГЛАВНЫЙ ФИКС: строим даты в локальном времени
+  // ============================================================
   const buildOccurrences = () => {
+    // startDate: "YYYY-MM-DD" → строим как локальную дату
+    const [y, m, d] = startDate.split('-').map(Number);
+    const baseLocalDate = new Date(y, m - 1, d); // локальная дата в 00:00
+
     if (recurringMode === 'once') {
-      const s = new Date(startDate);
-      s.setHours(startHour, startMinute, 0, 0);
-      const e = new Date(s.getTime() + durationMin * 60000);
-      return [{ s, e }];
+      // Разовый урок
+      const startLocal = new Date(
+        baseLocalDate.getFullYear(),
+        baseLocalDate.getMonth(),
+        baseLocalDate.getDate(),
+        startHour,
+        startMinute,
+        0,
+        0
+      );
+      const endLocal = new Date(startLocal.getTime() + durationMin * 60000);
+      return [{ s: startLocal, e: endLocal }];
     }
 
+    // Постоянный: recurringDays — массив дней недели
     const sortedDays = [...recurringDays].sort((a, b) => a - b);
     if (sortedDays.length === 0) return [];
 
-    const startMidnight = new Date(startDate);
-    startMidnight.setHours(0, 0, 0, 0);
-
-    const startIdx = jsDayToOurIdx(startMidnight.getDay());
-    const weekMonday = new Date(startMidnight);
-    weekMonday.setDate(weekMonday.getDate() - startIdx);
+    // Находим понедельник недели, в которой находится baseLocalDate
+    const baseIdx = jsDayToOurIdx(baseLocalDate.getDay());
+    const weekMonday = new Date(baseLocalDate);
+    weekMonday.setDate(weekMonday.getDate() - baseIdx);
 
     const occurrences = [];
+    const startMidnight = new Date(
+      baseLocalDate.getFullYear(),
+      baseLocalDate.getMonth(),
+      baseLocalDate.getDate(),
+      0,
+      0,
+      0,
+      0
+    );
+
     let week = 0;
     let safety = 0;
     while (week < recurringWeeks && safety < 500) {
@@ -1100,6 +1137,7 @@ const LessonEditor = ({
         date.setDate(date.getDate() + week * 7 + dayIdx);
         date.setHours(startHour, startMinute, 0, 0);
 
+        // Пропускаем даты до startMidnight
         if (date.getTime() < startMidnight.getTime()) continue;
 
         const end = new Date(date.getTime() + durationMin * 60000);
