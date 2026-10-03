@@ -14,7 +14,6 @@ export const StudentDashboard = ({ onOpenLesson }) => {
     supabase.auth.getUser().then(({ data }) => setUserId(data?.user?.id || null));
   }, []);
 
-  // Обновляем "сейчас" каждые 30 секунд, чтобы кнопка «Войти» появлялась вовремя
   useEffect(() => {
     const interval = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(interval);
@@ -62,7 +61,6 @@ export const StudentDashboard = ({ onOpenLesson }) => {
       setLessons(lessonsData || []);
       setBalance(subData?.balance ?? 0);
 
-      // Загружаем имена тренеров
       const teacherIds = [...new Set((lessonsData || []).map((l) => l.teacher_id))];
       if (teacherIds.length) {
         const { data: teacherProfiles } = await supabase
@@ -86,7 +84,6 @@ export const StudentDashboard = ({ onOpenLesson }) => {
     fetchAll();
   }, [fetchAll]);
 
-  // Realtime-обновления
   useEffect(() => {
     if (!userId) return;
     const channel = supabase
@@ -117,13 +114,21 @@ export const StudentDashboard = ({ onOpenLesson }) => {
     return arr;
   }, [weekStart]);
 
+  const toLocalDateKey = (dateInput) => {
+    const d = new Date(dateInput);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
   const lessonsByDay = useMemo(() => {
     const map = {};
     days.forEach((d) => {
-      map[d.toISOString().slice(0, 10)] = [];
+      map[toLocalDateKey(d)] = [];
     });
     lessons.forEach((l) => {
-      const key = new Date(l.starts_at).toISOString().slice(0, 10);
+      const key = toLocalDateKey(l.starts_at);
       if (map[key]) map[key].push(l);
     });
     return map;
@@ -145,9 +150,13 @@ export const StudentDashboard = ({ onOpenLesson }) => {
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
 
+  // ============================================================
+  // ОКНО ДОСТУПА: -30 мин до начала / +15 мин после конца
+  // ============================================================
   const getLessonStatus = (lesson) => {
     const start = new Date(lesson.starts_at);
     const end = new Date(lesson.ends_at);
+    const nowMs = now.getTime();
 
     if (lesson.status === 'cancelled') {
       return { label: 'Отменён', cls: 'bg-slate-100 text-slate-500', canJoin: false };
@@ -159,15 +168,19 @@ export const StudentDashboard = ({ onOpenLesson }) => {
       return { label: 'Проведён', cls: 'bg-blue-50 text-blue-700', canJoin: false };
     }
 
-    // scheduled
-    const nowMs = now.getTime();
-    if (nowMs >= start.getTime() - 5 * 60000 && nowMs <= end.getTime() + 30 * 60000) {
+    const openAt = start.getTime() - 30 * 60 * 1000; // -30 минут
+    const closeAt = end.getTime() + 15 * 60 * 1000;  // +15 минут
+
+    if (nowMs < openAt) {
+      return { label: 'Запланирован', cls: 'bg-emerald-50 text-emerald-700', canJoin: false };
+    }
+    if (nowMs >= openAt && nowMs <= end.getTime()) {
       return { label: 'Идёт сейчас', cls: 'bg-emerald-100 text-emerald-800', canJoin: true };
     }
-    if (nowMs > end.getTime()) {
-      return { label: 'Завершён', cls: 'bg-slate-100 text-slate-500', canJoin: false };
+    if (nowMs > end.getTime() && nowMs <= closeAt) {
+      return { label: 'Заканчивается', cls: 'bg-amber-100 text-amber-800', canJoin: true };
     }
-    return { label: 'Запланирован', cls: 'bg-emerald-50 text-emerald-700', canJoin: false };
+    return { label: 'Завершён', cls: 'bg-slate-100 text-slate-500', canJoin: false };
   };
 
   const weekTitle = `${weekStart.getDate()}.${String(weekStart.getMonth() + 1).padStart(2, '0')} – ${weekEnd.getDate()}.${String(weekEnd.getMonth() + 1).padStart(2, '0')}`;
@@ -177,7 +190,6 @@ export const StudentDashboard = ({ onOpenLesson }) => {
 
   return (
     <div className="space-y-5 max-w-5xl mx-auto">
-      {/* Шапка: баланс + навигация */}
       <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <div
@@ -266,7 +278,7 @@ export const StudentDashboard = ({ onOpenLesson }) => {
       ) : (
         <div className="space-y-2">
           {days.map((day) => {
-            const key = day.toISOString().slice(0, 10);
+            const key = toLocalDateKey(day);
             const dayLessons = lessonsByDay[key] || [];
             if (dayLessons.length === 0) return null;
             const label = formatDayLabel(day);
@@ -333,13 +345,13 @@ export const StudentDashboard = ({ onOpenLesson }) => {
                           {st.canJoin ? (
                             <button
                               onClick={() => onOpenLesson?.(l)}
-                              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm cursor-pointer animate-pulse"
+                              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm cursor-pointer"
                             >
                               ▶ Войти в урок
                             </button>
                           ) : st.label === 'Запланирован' ? (
                             <div className="text-[11px] text-gray-400 text-right">
-                              Кнопка появится<br />за 5 минут до начала
+                              Кнопка появится<br />за 30 минут до начала
                             </div>
                           ) : null}
                         </div>

@@ -17,28 +17,13 @@ const StudentDashboard = lazy(() =>
 
 const INITIAL_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
-// ============================================================
-// Универсальная функция: получить lessonId и roomId для урока.
-// Обе стороны (тренер и ученик) принимают одинаковое решение.
-// ============================================================
 const resolveLessonRoom = (crmLesson) => {
   const ids = crmLesson.student_ids || [];
   const isIndividual = ids.length === 1;
-  const isGroup = !isIndividual;
-
   if (isIndividual) {
-    return {
-      id: ids[0],
-      roomId: `room-${ids[0]}`,
-      isGroup: false,
-    };
+    return { id: ids[0], roomId: `room-${ids[0]}`, isGroup: false };
   }
-
-  return {
-    id: crmLesson.id,
-    roomId: `crm-${crmLesson.id}`,
-    isGroup: true,
-  };
+  return { id: crmLesson.id, roomId: `crm-${crmLesson.id}`, isGroup: true };
 };
 
 const readRoleCache = () => {
@@ -94,97 +79,131 @@ export default function App() {
 
   const [activeLesson, setActiveLesson] = useState(null);
 
+  // ============================================================
+  // Прямая ссылка ?room=... — открывает урок сразу
+  // ============================================================
+  const openRoomByUrl = useCallback(async (urlRoom, userId, role) => {
+    if (!urlRoom) return false;
+
+    // 1) Групповая комната
+    if (urlRoom.startsWith('group-')) {
+      const groupId = urlRoom.replace('group-', '');
+      const [{ data: groupRow }, { data: savedLesson }] = await Promise.all([
+        supabase.from('groups').select('id, name').eq('id', groupId).maybeSingle(),
+        supabase.from('lessons').select('*').eq('id', groupId).maybeSingle(),
+      ]);
+      if (groupRow) {
+        setActiveLesson({
+          ...(savedLesson || {}),
+          id: groupId,
+          roomId: `group-${groupId}`,
+          title: `Групповой урок: ${groupRow.name}`,
+          isGroup: true,
+          group: groupRow,
+          students: null,
+          fen: savedLesson?.fen || INITIAL_FEN,
+        });
+        setActiveTab('board');
+        return true;
+      }
+    }
+
+    // 2) CRM-урок (мульти-ученик)
+    if (urlRoom.startsWith('crm-')) {
+      const crmId = urlRoom.replace('crm-', '');
+      const [{ data: crmLesson }, { data: savedLesson }] = await Promise.all([
+        supabase.from('crm_lessons').select('*').eq('id', crmId).maybeSingle(),
+        supabase.from('lessons').select('*').eq('id', crmId).maybeSingle(),
+      ]);
+      if (crmLesson) {
+        // Для ученика — проверяем, что он в составе
+        const isStudent = role === 'student';
+        if (isStudent && !crmLesson.student_ids.includes(userId)) {
+          return false;
+        }
+        setActiveLesson({
+          ...(savedLesson || {}),
+          id: crmId,
+          roomId: `crm-${crmId}`,
+          title: 'Урок',
+          isGroup: crmLesson.student_ids.length > 1,
+          group: null,
+          students: null,
+          fen: savedLesson?.fen || INITIAL_FEN,
+        });
+        setActiveTab('board');
+        return true;
+      }
+    }
+
+    // 3) Личная комната room-<studentId>
+    if (urlRoom.startsWith('room-')) {
+      const targetId = urlRoom.replace('room-', '');
+      // Ученик может открыть только свою
+      if (role === 'student' && targetId !== userId) return false;
+
+      const [{ data: student }, { data: savedLesson }] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', targetId).maybeSingle(),
+        supabase.from('lessons').select('*').eq('id', targetId).maybeSingle(),
+      ]);
+      if (student) {
+        setActiveLesson({
+          ...(savedLesson || {}),
+          id: targetId,
+          roomId: `room-${targetId}`,
+          title: `Урок: ${student.name || student.email}`,
+          students: student,
+          fen: savedLesson?.fen || INITIAL_FEN,
+        });
+        setActiveTab('board');
+        return true;
+      }
+    }
+
+    return false;
+  }, []);
+
   const applyRole = useCallback(async (role, userId, data) => {
     localStorage.setItem('beechess_role', role);
     setUserRole(role);
 
+    // Первым делом — если в URL есть комната, сразу открываем её
+    const params = new URLSearchParams(window.location.search);
+    const urlRoom = params.get('room');
+
     if (role === 'admin' || role === 'crm_admin') {
+      if (urlRoom) {
+        const opened = await openRoomByUrl(urlRoom, userId, role);
+        if (opened) return;
+      }
       setActiveTab('admin');
       setActiveLesson(null);
-      window.history.replaceState({}, '', window.location.pathname);
+      if (!urlRoom) window.history.replaceState({}, '', window.location.pathname);
       return;
     }
 
     if (role === 'teacher') {
-      const hasRoom = new URLSearchParams(window.location.search).has('room');
-      if (hasRoom) setActiveTab('board');
-      else {
-        setActiveTab('teacher-panel');
-        setActiveLesson(null);
+      if (urlRoom) {
+        const opened = await openRoomByUrl(urlRoom, userId, role);
+        if (opened) return;
       }
+      setActiveTab('teacher-panel');
+      setActiveLesson(null);
       return;
     }
 
     if (role === 'student') {
-      const params = new URLSearchParams(window.location.search);
-      const urlRoom = params.get('room');
-
-      if (urlRoom && urlRoom.startsWith('group-')) {
-        const groupId = urlRoom.replace('group-', '');
-        const [{ data: groupRow }, { data: groupLesson }] = await Promise.all([
-          supabase.from('groups').select('id, name').eq('id', groupId).maybeSingle(),
-          supabase.from('lessons').select('*').eq('id', groupId).maybeSingle(),
-        ]);
-        if (groupRow) {
-          setActiveLesson({
-            ...(groupLesson || {}),
-            id: groupId,
-            roomId: `group-${groupId}`,
-            title: `Групповой урок: ${groupRow.name}`,
-            isGroup: true,
-            group: groupRow,
-            students: null,
-            fen: groupLesson?.fen || INITIAL_FEN,
-          });
-          setActiveTab('board');
-          return;
-        }
+      if (urlRoom) {
+        const opened = await openRoomByUrl(urlRoom, userId, role);
+        if (opened) return;
+        // Если комната не открылась (чужая, не существует) — чистим URL
+        window.history.replaceState({}, '', window.location.pathname);
       }
-
-      if (urlRoom && urlRoom.startsWith('crm-')) {
-        const crmId = urlRoom.replace('crm-', '');
-        const { data: crmLesson } = await supabase
-          .from('crm_lessons').select('*').eq('id', crmId).maybeSingle();
-        const { data: savedLesson } = await supabase
-          .from('lessons').select('*').eq('id', crmId).maybeSingle();
-        if (crmLesson && crmLesson.student_ids.includes(userId)) {
-          const resolved = resolveLessonRoom(crmLesson);
-          setActiveLesson({
-            ...(savedLesson || {}),
-            id: resolved.id,
-            roomId: resolved.roomId,
-            title: 'Урок',
-            isGroup: resolved.isGroup,
-            students: null,
-            fen: savedLesson?.fen || INITIAL_FEN,
-          });
-          setActiveTab('board');
-          return;
-        }
-      }
-
-      if (urlRoom && urlRoom.startsWith('room-')) {
-        const targetId = urlRoom.replace('room-', '');
-        if (targetId === userId) {
-          const { data: savedLesson } = await supabase
-            .from('lessons').select('*').eq('id', userId).maybeSingle();
-          setActiveLesson({
-            ...(savedLesson || {}),
-            id: userId,
-            roomId: `room-${userId}`,
-            title: 'Ваш урок',
-            students: { id: userId, name: data?.name || 'Ученик' },
-            fen: savedLesson?.fen || INITIAL_FEN,
-          });
-          setActiveTab('board');
-          return;
-        }
-      }
-
+      // Без ссылки — дашборд с расписанием
       setActiveTab('student-panel');
       setActiveLesson(null);
     }
-  }, []);
+  }, [openRoomByUrl]);
 
   const fetchUserRole = useCallback(async (userId, { silent = false } = {}) => {
     if (!silent) setDbErrorDetails(null);
@@ -222,7 +241,8 @@ export default function App() {
       writeRoleCache(userId, role, data.name || '');
 
       const currentRole = localStorage.getItem('beechess_role');
-      if (currentRole === role && silent) return;
+      const urlRoom = new URLSearchParams(window.location.search).get('room');
+      if (currentRole === role && silent && !urlRoom) return;
 
       await applyRole(role, userId, data);
     } catch (err) {
@@ -248,15 +268,6 @@ export default function App() {
           if (cached && cached.userId === userId) {
             setUserRole(cached.role);
             localStorage.setItem('beechess_role', cached.role);
-            if (cached.role === 'admin' || cached.role === 'crm_admin') {
-              setActiveTab('admin');
-            } else if (cached.role === 'teacher') {
-              const hasRoom = new URLSearchParams(window.location.search).has('room');
-              setActiveTab(hasRoom ? 'board' : 'teacher-panel');
-            } else if (cached.role === 'student') {
-              const hasRoom = new URLSearchParams(window.location.search).has('room');
-              setActiveTab(hasRoom ? 'board' : 'student-panel');
-            }
           }
 
           const doFullCheck = !cached || cached.userId !== userId;
@@ -285,9 +296,6 @@ export default function App() {
     };
   }, [fetchUserRole]);
 
-  // ============================================================
-  // ОТКРЫТИЕ УРОКА УЧЕНИКОМ — ИСПРАВЛЕНО
-  // ============================================================
   const handleStudentOpenLesson = async (crmLesson) => {
     const resolved = resolveLessonRoom(crmLesson);
     const { data: savedLesson } = await supabase
@@ -359,14 +367,9 @@ export default function App() {
     setActiveTab('board');
   };
 
-  // ============================================================
-  // ОТКРЫТИЕ УРОКА ТРЕНЕРОМ — ИСПРАВЛЕНО
-  // Использует ту же функцию resolveLessonRoom
-  // ============================================================
   const handleStartCrmLesson = async (crmLesson) => {
     const resolved = resolveLessonRoom(crmLesson);
 
-    // Для индивидуального урока сохраняем данные ученика для заголовка
     let students = null;
     let group = null;
 

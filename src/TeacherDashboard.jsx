@@ -513,6 +513,7 @@ const GroupsTab = ({ userId, onOpenGroupRoom }) => {
     </div>
   );
 };
+
 /* ============================================================
    Вкладка: Расписание
    ============================================================ */
@@ -525,6 +526,12 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
   const [fetching, setFetching] = useState(true);
   const [creatingAt, setCreatingAt] = useState(null);
   const [detailsLesson, setDetailsLesson] = useState(null);
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(t);
+  }, []);
 
   const weekStart = useMemo(() => {
     const today = new Date();
@@ -631,7 +638,6 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
     return arr;
   }, [weekStart]);
 
-  // ЛОКАЛЬНАЯ дата в формате YYYY-MM-DD (без UTC сдвига)
   const toLocalDateKey = (dateInput) => {
     const d = new Date(dateInput);
     const y = d.getFullYear();
@@ -665,8 +671,6 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
 
-  const isPast = (iso) => new Date(iso) < new Date();
-
   const getLessonLabel = (lesson) => {
     if (lesson.is_group) {
       const grp = groups.find((g) =>
@@ -680,6 +684,19 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
   };
 
   const weekTitle = `${weekStart.getDate()}.${String(weekStart.getMonth() + 1).padStart(2, '0')} – ${weekEnd.getDate()}.${String(weekEnd.getMonth() + 1).padStart(2, '0')}`;
+
+  // ============================================================
+  // ОКНО ДОСТУПА: -30 / +15 минут (то же, что у ученика)
+  // ============================================================
+  const canStartLesson = (lesson) => {
+    if (lesson.status !== 'scheduled') return false;
+    const start = new Date(lesson.starts_at).getTime();
+    const end = new Date(lesson.ends_at).getTime();
+    const nowMs = now.getTime();
+    const openAt = start - 30 * 60 * 1000;
+    const closeAt = end + 15 * 60 * 1000;
+    return nowMs >= openAt && nowMs <= closeAt;
+  };
 
   const markLessonDone = async (lesson, attendance) => {
     try {
@@ -833,7 +850,7 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
                     <div className="h-full" />
                   ) : (
                     dayLessons.map((l) => {
-                      const past = isPast(l.ends_at);
+                      const past = new Date(l.ends_at) < now;
                       const unmarked = past && l.status === 'scheduled';
                       const cancelled = l.status === 'cancelled';
                       const done = l.status === 'done';
@@ -899,6 +916,7 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
           subs={subs}
           getLessonLabel={getLessonLabel}
           formatTime={formatTime}
+          canStart={canStartLesson(detailsLesson)}
           onClose={() => setDetailsLesson(null)}
           onDelete={() => deleteLesson(detailsLesson)}
           onStart={() => {
@@ -924,6 +942,7 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
     </div>
   );
 };
+
 /* ============================================================
    Модалка: создание урока
    ============================================================ */
@@ -941,12 +960,8 @@ const WEEKDAYS = [
 ];
 
 const pad2 = (n) => String(n).padStart(2, '0');
-
-// JS getDay(): Вс=0, Пн=1 ... Сб=6
-// Наш idx:    Пн=0, Вт=1 ... Вс=6
 const jsDayToOurIdx = (jsDay) => (jsDay === 0 ? 6 : jsDay - 1);
 
-// Формат YYYY-MM-DD в ЛОКАЛЬНОМ часовом поясе
 const dateToInputValue = (date) => {
   const d = new Date(date);
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -1008,7 +1023,6 @@ const LessonEditor = ({
   const [selectedStudentIds, setSelectedStudentIds] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState('');
 
-  // Дата в формате YYYY-MM-DD (локальная)
   const [startDate, setStartDate] = useState(dateToInputValue(baseDate));
   const [startHour, setStartHour] = useState(baseDate.getHours());
   const [startMinute, setStartMinute] = useState(0);
@@ -1026,7 +1040,6 @@ const LessonEditor = ({
 
   useEffect(() => {
     if (recurringMode === 'weekly' && recurringDays.length === 0 && startDate) {
-      // startDate: "YYYY-MM-DD" — парсим как локальную дату
       const [y, m, d] = startDate.split('-').map(Number);
       const localDate = new Date(y, m - 1, d);
       setRecurringDays([jsDayToOurIdx(localDate.getDay())]);
@@ -1085,16 +1098,11 @@ const LessonEditor = ({
     );
   };
 
-  // ============================================================
-  // ГЛАВНЫЙ ФИКС: строим даты в локальном времени
-  // ============================================================
   const buildOccurrences = () => {
-    // startDate: "YYYY-MM-DD" → строим как локальную дату
     const [y, m, d] = startDate.split('-').map(Number);
-    const baseLocalDate = new Date(y, m - 1, d); // локальная дата в 00:00
+    const baseLocalDate = new Date(y, m - 1, d);
 
     if (recurringMode === 'once') {
-      // Разовый урок
       const startLocal = new Date(
         baseLocalDate.getFullYear(),
         baseLocalDate.getMonth(),
@@ -1108,11 +1116,9 @@ const LessonEditor = ({
       return [{ s: startLocal, e: endLocal }];
     }
 
-    // Постоянный: recurringDays — массив дней недели
     const sortedDays = [...recurringDays].sort((a, b) => a - b);
     if (sortedDays.length === 0) return [];
 
-    // Находим понедельник недели, в которой находится baseLocalDate
     const baseIdx = jsDayToOurIdx(baseLocalDate.getDay());
     const weekMonday = new Date(baseLocalDate);
     weekMonday.setDate(weekMonday.getDate() - baseIdx);
@@ -1137,7 +1143,6 @@ const LessonEditor = ({
         date.setDate(date.getDate() + week * 7 + dayIdx);
         date.setHours(startHour, startMinute, 0, 0);
 
-        // Пропускаем даты до startMidnight
         if (date.getTime() < startMidnight.getTime()) continue;
 
         const end = new Date(date.getTime() + durationMin * 60000);
@@ -1538,6 +1543,7 @@ const LessonDetailsModal = ({
   subs,
   getLessonLabel,
   formatTime,
+  canStart,
   onClose,
   onDelete,
   onStart,
@@ -1679,13 +1685,19 @@ const LessonDetailsModal = ({
         )}
 
         <div className="space-y-2">
-          {canMark && !isPast && (
+          {canMark && canStart && (
             <button
               onClick={() => onStart?.()}
               className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-sm cursor-pointer"
             >
               ▶ Начать урок
             </button>
+          )}
+
+          {canMark && !canStart && (
+            <div className="w-full py-2.5 bg-slate-100 text-slate-500 font-semibold rounded-xl text-sm text-center">
+              Урок доступен за 30 минут до начала
+            </div>
           )}
 
           {canMark && (
