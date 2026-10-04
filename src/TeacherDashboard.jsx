@@ -1712,7 +1712,7 @@ const LessonDetailsModal = ({
               onClick={onRevert}
               className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-700 font-bold rounded-xl text-sm cursor-pointer border border-red-200"
             >
-              ↩️ Отменить проведение (вернуть абонемент и снять ЗП)
+              ↩️ Отменить проведение
             </button>
           )}
 
