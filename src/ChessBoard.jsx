@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Chess } from 'chess.js';
 import { Chessboard, BORDER_TYPE, COLOR } from 'cm-chessboard';
 import { MARKER_TYPE, Markers } from 'cm-chessboard/src/extensions/markers/Markers.js';
@@ -66,7 +66,7 @@ const playSound = (type) => {
       osc.stop(now + 0.05);
     }
   } catch {
-    // Звук не обязателен — браузер может запретить AudioContext.
+    // Звук не обязателен
   }
 };
 
@@ -142,27 +142,6 @@ const formatTime = (ms) => {
     return `${sec}.${tenths}`;
   }
   return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-};
-
-// ============================================================
-// Вспомогательная: сравнение FEN по "номеру полухода"
-// Возвращает true, если newFen НЕ старее текущего fen
-// ============================================================
-const isFenNotOlder = (currentFen, newFen) => {
-  try {
-    const c = currentFen.split(' ');
-    const n = newFen.split(' ');
-
-    const cFull = parseInt(c[5] || '1', 10);
-    const nFull = parseInt(n[5] || '1', 10);
-
-    const currentNum = cFull * 2 + (c[1] === 'b' ? 1 : 0);
-    const newNum = nFull * 2 + (n[1] === 'b' ? 1 : 0);
-
-    return newNum >= currentNum;
-  } catch {
-    return true;
-  }
 };
 
 export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson }) => {
@@ -247,7 +226,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     editorCastling,
   ]);
 
-  // ИСПРАВЛЕНО: debounce 5 секунд вместо 3
   const saveState = useCallback(
     async (fen, studentCanMove, sharedState = {}) => {
       if (!lesson?.id) return;
@@ -877,6 +855,11 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         },
         (payload) => {
           if (!payload.new) return;
+
+          // ВАЖНО: fen и move_tree здесь НЕ применяем.
+          // Их двигает только broadcast — он быстрее и не откатывает.
+          // Здесь только служебное: часы, разблокировка, смена цвета.
+
           if (payload.new.can_student_move !== undefined) {
             setCanStudentMove(payload.new.can_student_move);
             canStudentMoveRef.current = payload.new.can_student_move;
@@ -904,29 +887,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           if (payload.new.increment_ms !== undefined) {
             incrementMsRef.current = payload.new.increment_ms;
             setIncrementMs(payload.new.increment_ms);
-          }
-          if (payload.new.move_tree?.root) {
-            const syncedCurrentId = payload.new.move_tree[payload.new.current_node_id]
-              ? payload.new.current_node_id
-              : 'root';
-            treeRef.current = payload.new.move_tree;
-            currentIdRef.current = syncedCurrentId;
-            setTree(payload.new.move_tree);
-            setCurrentId(syncedCurrentId);
-          }
-
-          // ИСПРАВЛЕНО: не откатываем доску, если FEN из БД старее текущего
-          if (payload.new.fen && payload.new.fen !== gameRef.current.fen()) {
-            const currentFen = gameRef.current.fen();
-            if (isFenNotOlder(currentFen, payload.new.fen)) {
-              try {
-                gameRef.current.load(payload.new.fen, { skipValidation: true });
-                if (chessboardInstance.current)
-                  chessboardInstance.current.setPosition(payload.new.fen, true);
-              } catch {
-                // Некорректное внешнее состояние игнорируем
-              }
-            }
           }
         }
       )
@@ -966,13 +926,9 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             }
           }
         } else if (payload.fen) {
-          // Тоже проверяем на устаревание
-          const currentFen = gameRef.current.fen();
-          if (isFenNotOlder(currentFen, payload.fen)) {
-            gameRef.current.load(payload.fen, { skipValidation: true });
-            if (chessboardInstance.current)
-              chessboardInstance.current.setPosition(payload.fen, true);
-          }
+          gameRef.current.load(payload.fen, { skipValidation: true });
+          if (chessboardInstance.current)
+            chessboardInstance.current.setPosition(payload.fen, true);
           if (payload.moveTree?.root) {
             const syncedCurrentId = payload.moveTree[payload.currentNodeId]
               ? payload.currentNodeId
@@ -1407,7 +1363,11 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     });
   };
 
-  const renderMoveNotation = () => {
+  // ============================================================
+  // ОПТИМИЗИРОВАНО: обёрнуто в useMemo, чтобы не пересчитывать
+  // при каждом ре-рендере (тик часов, обновление состояния)
+  // ============================================================
+  const moveNotationContent = useMemo(() => {
     const rootNode = tree.root;
     if (!rootNode || !rootNode.children?.length) {
       return (
@@ -1504,7 +1464,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         {renderLine(rootNode.children[0], firstPly)}
       </div>
     );
-  };
+  }, [tree, currentId, isTeacher, jumpToNode]);
 
   if (!lesson) return <div className="p-8 text-center text-gray-500">Урок не выбран</div>;
   return (
@@ -1827,7 +1787,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             )}
           </div>
           <div className="flex-1 overflow-y-auto border border-gray-100 rounded-xl bg-white">
-            {renderMoveNotation()}
+            {moveNotationContent}
           </div>
           {isTeacher && (
             <div className="grid grid-cols-2 gap-2 mt-2">
