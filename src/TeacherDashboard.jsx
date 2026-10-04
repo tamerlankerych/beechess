@@ -513,7 +513,6 @@ const GroupsTab = ({ userId, onOpenGroupRoom }) => {
     </div>
   );
 };
-
 /* ============================================================
    Вкладка: Расписание
    ============================================================ */
@@ -685,63 +684,50 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
 
   const weekTitle = `${weekStart.getDate()}.${String(weekStart.getMonth() + 1).padStart(2, '0')} – ${weekEnd.getDate()}.${String(weekEnd.getMonth() + 1).padStart(2, '0')}`;
 
-  // ============================================================
-  // ОКНО ДОСТУПА: -30 / +15 минут (то же, что у ученика)
-  // ============================================================
-  const canStartLesson = (lesson) => {
-    if (lesson.status !== 'scheduled') return false;
-    const start = new Date(lesson.starts_at).getTime();
-    const end = new Date(lesson.ends_at).getTime();
-    const nowMs = now.getTime();
-    const openAt = start - 30 * 60 * 1000;
-    const closeAt = end + 15 * 60 * 1000;
-    return nowMs >= openAt && nowMs <= closeAt;
-  };
+  // Тренер может начать урок всегда, если статус scheduled
+  const canStartLesson = (lesson) => lesson.status === 'scheduled';
 
   const markLessonDone = async (lesson, attendance) => {
-  try {
-    const { error } = await supabase
-      .from('crm_lessons')
-      .update({
-        status: 'done',
-        attendance,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', lesson.id);
-    if (error) throw error;
-
-    // Кто реально пришёл (для списания абонемента и расчёта ЗП)
-    const attendees = lesson.student_ids.filter(
-      (sid) => attendance[sid] !== false
-    );
-
-    // Списываем по 1 занятию с каждого
-    for (const sid of attendees) {
-      await supabase.rpc('adjust_subscription', {
-        p_student_id: sid,
-        p_delta: -1,
-        p_reason: `Посещение урока ${new Date(lesson.starts_at).toLocaleDateString('ru-RU')}`,
-        p_lesson_id: lesson.id,
-      });
-    }
-
-    // Начисляем зарплату тренеру
     try {
-      await supabase.rpc('add_teacher_earning', {
-        p_lesson_id: lesson.id,
-        p_attendees_count: attendees.length,
-      });
-    } catch (err) {
-      console.error('Ошибка начисления ЗП:', err);
-    }
+      const { error } = await supabase
+        .from('crm_lessons')
+        .update({
+          status: 'done',
+          attendance,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', lesson.id);
+      if (error) throw error;
 
-    setDetailsLesson(null);
-    await fetchAll();
-  } catch (err) {
-    console.error('Ошибка отметки урока:', err);
-    alert('Ошибка: ' + err.message);
-  }
-};
+      const attendees = lesson.student_ids.filter(
+        (sid) => attendance[sid] !== false
+      );
+
+      for (const sid of attendees) {
+        await supabase.rpc('adjust_subscription', {
+          p_student_id: sid,
+          p_delta: -1,
+          p_reason: `Посещение урока ${new Date(lesson.starts_at).toLocaleDateString('ru-RU')}`,
+          p_lesson_id: lesson.id,
+        });
+      }
+
+      try {
+        await supabase.rpc('add_teacher_earning', {
+          p_lesson_id: lesson.id,
+          p_attendees_count: attendees.length,
+        });
+      } catch (err) {
+        console.error('Ошибка начисления ЗП:', err);
+      }
+
+      setDetailsLesson(null);
+      await fetchAll();
+    } catch (err) {
+      console.error('Ошибка отметки урока:', err);
+      alert('Ошибка: ' + err.message);
+    }
+  };
 
   const markLessonSkipped = async (lesson) => {
     try {
@@ -754,6 +740,19 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
       await fetchAll();
     } catch (err) {
       alert('Ошибка: ' + err.message);
+    }
+  };
+
+  const revertLesson = async (lesson) => {
+    try {
+      const { error } = await supabase.rpc('revert_lesson_to_scheduled', {
+        p_lesson_id: lesson.id,
+      });
+      if (error) throw error;
+      setDetailsLesson(null);
+      await fetchAll();
+    } catch (err) {
+      alert('Ошибка отмены: ' + err.message);
     }
   };
 
@@ -935,6 +934,15 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
           onStart={() => {
             onStartCrmRoom?.(detailsLesson);
           }}
+          onRevert={() => {
+            if (
+              window.confirm(
+                'Отменить проведение урока?\n\n• Абонемент ученикам вернётся (+1)\n• Зарплата за урок будет снята'
+              )
+            ) {
+              revertLesson(detailsLesson);
+            }
+          }}
           onMarkDone={(attendance) => markLessonDone(detailsLesson, attendance)}
           onMarkSkipped={() => markLessonSkipped(detailsLesson)}
           onMarkCancelled={async () => {
@@ -955,7 +963,6 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
     </div>
   );
 };
-
 /* ============================================================
    Модалка: создание урока
    ============================================================ */
@@ -1560,6 +1567,7 @@ const LessonDetailsModal = ({
   onClose,
   onDelete,
   onStart,
+  onRevert,
   onMarkDone,
   onMarkSkipped,
   onMarkCancelled,
@@ -1601,6 +1609,7 @@ const LessonDetailsModal = ({
   })();
 
   const canMark = lesson.status === 'scheduled';
+  const canRevert = lesson.status === 'done';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
@@ -1698,6 +1707,15 @@ const LessonDetailsModal = ({
         )}
 
         <div className="space-y-2">
+          {canRevert && (
+            <button
+              onClick={onRevert}
+              className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-700 font-bold rounded-xl text-sm cursor-pointer border border-red-200"
+            >
+              ↩️ Отменить проведение (вернуть абонемент и снять ЗП)
+            </button>
+          )}
+
           {canMark && canStart && (
             <button
               onClick={() => onStart?.()}
@@ -1705,12 +1723,6 @@ const LessonDetailsModal = ({
             >
               ▶ Начать урок
             </button>
-          )}
-
-          {canMark && !canStart && (
-            <div className="w-full py-2.5 bg-slate-100 text-slate-500 font-semibold rounded-xl text-sm text-center">
-              Урок доступен за 30 минут до начала
-            </div>
           )}
 
           {canMark && (

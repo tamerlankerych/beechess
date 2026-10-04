@@ -151,7 +151,7 @@ export const StudentDashboard = ({ onOpenLesson }) => {
   };
 
   // ============================================================
-  // ОКНО ДОСТУПА: -30 мин до начала / +15 мин после конца
+  // БЕЗ ОКНА -30 / +15 — можно зайти в любой момент
   // ============================================================
   const getLessonStatus = (lesson) => {
     const start = new Date(lesson.starts_at);
@@ -168,19 +168,14 @@ export const StudentDashboard = ({ onOpenLesson }) => {
       return { label: 'Проведён', cls: 'bg-blue-50 text-blue-700', canJoin: false };
     }
 
-    const openAt = start.getTime() - 30 * 60 * 1000; // -30 минут
-    const closeAt = end.getTime() + 15 * 60 * 1000;  // +15 минут
-
-    if (nowMs < openAt) {
-      return { label: 'Запланирован', cls: 'bg-emerald-50 text-emerald-700', canJoin: false };
-    }
-    if (nowMs >= openAt && nowMs <= end.getTime()) {
+    // scheduled — зайти можно в любой момент
+    if (nowMs >= start.getTime() && nowMs <= end.getTime()) {
       return { label: 'Идёт сейчас', cls: 'bg-emerald-100 text-emerald-800', canJoin: true };
     }
-    if (nowMs > end.getTime() && nowMs <= closeAt) {
-      return { label: 'Заканчивается', cls: 'bg-amber-100 text-amber-800', canJoin: true };
+    if (nowMs > end.getTime()) {
+      return { label: 'Прошёл', cls: 'bg-slate-100 text-slate-500', canJoin: true };
     }
-    return { label: 'Завершён', cls: 'bg-slate-100 text-slate-500', canJoin: false };
+    return { label: 'Запланирован', cls: 'bg-emerald-50 text-emerald-700', canJoin: true };
   };
 
   const weekTitle = `${weekStart.getDate()}.${String(weekStart.getMonth() + 1).padStart(2, '0')} – ${weekEnd.getDate()}.${String(weekEnd.getMonth() + 1).padStart(2, '0')}`;
@@ -349,10 +344,6 @@ export const StudentDashboard = ({ onOpenLesson }) => {
                             >
                               ▶ Войти в урок
                             </button>
-                          ) : st.label === 'Запланирован' ? (
-                            <div className="text-[11px] text-gray-400 text-right">
-                              Кнопка появится<br />за 30 минут до начала
-                            </div>
                           ) : null}
                         </div>
                       </div>
