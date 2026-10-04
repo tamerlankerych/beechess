@@ -699,36 +699,49 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
   };
 
   const markLessonDone = async (lesson, attendance) => {
-    try {
-      const { error } = await supabase
-        .from('crm_lessons')
-        .update({
-          status: 'done',
-          attendance,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', lesson.id);
-      if (error) throw error;
+  try {
+    const { error } = await supabase
+      .from('crm_lessons')
+      .update({
+        status: 'done',
+        attendance,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', lesson.id);
+    if (error) throw error;
 
-      const attendees = lesson.student_ids.filter(
-        (sid) => attendance[sid] !== false
-      );
-      for (const sid of attendees) {
-        await supabase.rpc('adjust_subscription', {
-          p_student_id: sid,
-          p_delta: -1,
-          p_reason: `Посещение урока ${new Date(lesson.starts_at).toLocaleDateString('ru-RU')}`,
-          p_lesson_id: lesson.id,
-        });
-      }
+    // Кто реально пришёл (для списания абонемента и расчёта ЗП)
+    const attendees = lesson.student_ids.filter(
+      (sid) => attendance[sid] !== false
+    );
 
-      setDetailsLesson(null);
-      await fetchAll();
-    } catch (err) {
-      console.error('Ошибка отметки урока:', err);
-      alert('Ошибка: ' + err.message);
+    // Списываем по 1 занятию с каждого
+    for (const sid of attendees) {
+      await supabase.rpc('adjust_subscription', {
+        p_student_id: sid,
+        p_delta: -1,
+        p_reason: `Посещение урока ${new Date(lesson.starts_at).toLocaleDateString('ru-RU')}`,
+        p_lesson_id: lesson.id,
+      });
     }
-  };
+
+    // Начисляем зарплату тренеру
+    try {
+      await supabase.rpc('add_teacher_earning', {
+        p_lesson_id: lesson.id,
+        p_attendees_count: attendees.length,
+      });
+    } catch (err) {
+      console.error('Ошибка начисления ЗП:', err);
+    }
+
+    setDetailsLesson(null);
+    await fetchAll();
+  } catch (err) {
+    console.error('Ошибка отметки урока:', err);
+    alert('Ошибка: ' + err.message);
+  }
+};
 
   const markLessonSkipped = async (lesson) => {
     try {

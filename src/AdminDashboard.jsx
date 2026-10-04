@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from './supabaseClient';
 
 const PAGE_SIZE = 50;
@@ -34,6 +34,18 @@ export const AdminDashboard = ({ userRole, onObserveRoom }) => {
         </button>
         {isSuper && (
           <button
+            onClick={() => setActiveTab('salary')}
+            className={`px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer ${
+              activeTab === 'salary'
+                ? 'bg-amber-500 text-white shadow-sm'
+                : 'text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            💰 Зарплата
+          </button>
+        )}
+        {isSuper && (
+          <button
             onClick={() => setActiveTab('admins')}
             className={`px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer ${
               activeTab === 'admins'
@@ -48,6 +60,7 @@ export const AdminDashboard = ({ userRole, onObserveRoom }) => {
 
       {isSuper && activeTab === 'users' && <UsersTab onObserveRoom={onObserveRoom} />}
       {activeTab === 'subscriptions' && <SubscriptionsTab />}
+      {isSuper && activeTab === 'salary' && <SalaryTab />}
       {isSuper && activeTab === 'admins' && <AdminsTab />}
     </div>
   );
@@ -105,7 +118,6 @@ const UsersTab = ({ onObserveRoom }) => {
   const [activeLessons, setActiveLessons] = useState([]);
   const [fetchingLessons, setFetchingLessons] = useState(true);
 
-  // Debounce поиска
   useEffect(() => {
     const t = setTimeout(() => {
       setSearchDebounced(search);
@@ -498,7 +510,6 @@ const SubscriptionsTab = () => {
       setStudents(studentsData || []);
       setTotalStudents(count || 0);
 
-      // Подтягиваем балансы только для видимых учеников
       const ids = (studentsData || []).map((s) => s.id);
       if (ids.length) {
         const { data: subsData, error: subErr } = await supabase
@@ -780,7 +791,292 @@ const SubscriptionsTab = () => {
 };
 
 /* ============================================================
-   Вкладка 3: Админы (только для суперадмина)
+   Вкладка 3: Зарплата тренеров
+   ============================================================ */
+const SalaryTab = () => {
+  const today = new Date();
+  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+  const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+
+  const [dateFrom, setDateFrom] = useState(() => {
+    const d = firstDay;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const [dateTo, setDateTo] = useState(() => {
+    const d = lastDay;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const [teacherFilter, setTeacherFilter] = useState('');
+  const [teachers, setTeachers] = useState([]);
+  const [earnings, setEarnings] = useState([]);
+  const [fetching, setFetching] = useState(true);
+  const [recalculating, setRecalculating] = useState(false);
+  const [message, setMessage] = useState(null);
+  const [error, setError] = useState(null);
+
+  const fetchTeachers = useCallback(async () => {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, name, email')
+      .eq('role', 'teacher')
+      .order('name');
+    setTeachers(data || []);
+  }, []);
+
+  const fetchEarnings = useCallback(async () => {
+    setFetching(true);
+    setError(null);
+    try {
+      const fromIso = new Date(dateFrom + 'T00:00:00').toISOString();
+      const toIso = new Date(dateTo + 'T23:59:59').toISOString();
+
+      let query = supabase
+        .from('teacher_earnings')
+        .select('id, teacher_id, lesson_id, amount, duration_min, student_count, is_group, lesson_date')
+        .gte('lesson_date', fromIso)
+        .lte('lesson_date', toIso)
+        .order('lesson_date', { ascending: false });
+
+      if (teacherFilter) {
+        query = query.eq('teacher_id', teacherFilter);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      setEarnings(data || []);
+    } catch (err) {
+      console.error('Ошибка загрузки зарплаты:', err);
+      setError(err.message);
+    } finally {
+      setFetching(false);
+    }
+  }, [dateFrom, dateTo, teacherFilter]);
+
+  useEffect(() => {
+    fetchTeachers();
+  }, [fetchTeachers]);
+
+  useEffect(() => {
+    fetchEarnings();
+  }, [fetchEarnings]);
+
+  const handleRecalculate = async () => {
+    if (
+      !window.confirm(
+        'Пересчитать все уже проведённые уроки?\n\nБудут добавлены записи только для уроков, у которых их ещё нет.'
+      )
+    )
+      return;
+    setRecalculating(true);
+    setMessage(null);
+    setError(null);
+    try {
+      const { data, error } = await supabase.rpc('recalculate_all_earnings');
+      if (error) throw error;
+      setMessage(`Добавлено записей: ${data || 0}`);
+      await fetchEarnings();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRecalculating(false);
+    }
+  };
+
+  const teacherMap = useMemo(() => {
+    const m = {};
+    teachers.forEach((t) => (m[t.id] = t));
+    return m;
+  }, [teachers]);
+
+  const total = useMemo(
+    () => earnings.reduce((sum, e) => sum + (e.amount || 0), 0),
+    [earnings]
+  );
+
+  const byTeacher = useMemo(() => {
+    const m = {};
+    earnings.forEach((e) => {
+      if (!m[e.teacher_id]) {
+        m[e.teacher_id] = { total: 0, count: 0 };
+      }
+      m[e.teacher_id].total += e.amount || 0;
+      m[e.teacher_id].count += 1;
+    });
+    return m;
+  }, [earnings]);
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div>
+            <h3 className="text-lg font-bold text-gray-900">💰 Зарплата тренеров</h3>
+            <p className="text-xs text-gray-400 mt-1">
+              Период — по дате урока. Считается по фактически пришедшим ученикам.
+            </p>
+          </div>
+          <button
+            onClick={handleRecalculate}
+            disabled={recalculating}
+            className="text-xs px-3 py-1.5 bg-amber-100 text-amber-800 hover:bg-amber-200 rounded-lg font-bold disabled:opacity-50 cursor-pointer"
+          >
+            {recalculating ? 'Пересчёт...' : '🔄 Пересчитать всё'}
+          </button>
+        </div>
+
+        {message && (
+          <div className="mb-3 p-2 bg-green-50 text-green-700 text-xs rounded-lg">{message}</div>
+        )}
+        {error && (
+          <div className="mb-3 p-2 bg-red-50 text-red-600 text-xs rounded-lg">{error}</div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          <div>
+            <label className="block text-xs font-bold text-gray-700 mb-1">С даты</label>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-700 mb-1">По дату</label>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-700 mb-1">Тренер</label>
+            <select
+              value={teacherFilter}
+              onChange={(e) => setTeacherFilter(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white cursor-pointer"
+            >
+              <option value="">Все тренеры</option>
+              {teachers.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name || t.email}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between">
+          <div>
+            <div className="text-xs font-bold text-amber-700 uppercase tracking-wide">
+              Итого за период
+            </div>
+            <div className="text-2xl font-black text-amber-900 mt-1">
+              {total.toLocaleString('ru-RU')} ₸
+            </div>
+          </div>
+          <div className="text-right text-xs text-amber-700">
+            Уроков: <strong>{earnings.length}</strong>
+          </div>
+        </div>
+
+        {Object.keys(byTeacher).length > 0 && (
+          <div className="mt-4 space-y-2">
+            <div className="text-xs font-bold text-gray-700 uppercase tracking-wide">
+              По тренерам
+            </div>
+            {Object.entries(byTeacher).map(([tid, info]) => {
+              const t = teacherMap[tid];
+              return (
+                <div
+                  key={tid}
+                  className="flex items-center justify-between px-3 py-2 bg-slate-50 rounded-xl border border-slate-100"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-bold text-gray-900 truncate">
+                      {t?.name || t?.email || 'Тренер'}
+                    </div>
+                    <div className="text-[11px] text-gray-400">
+                      Уроков: {info.count}
+                    </div>
+                  </div>
+                  <div className="text-base font-black text-emerald-700 shrink-0">
+                    {info.total.toLocaleString('ru-RU')} ₸
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+        <h3 className="text-base font-bold text-gray-900 mb-4">Детализация</h3>
+
+        {fetching ? (
+          <div className="text-xs text-gray-400 py-6 text-center">Загрузка…</div>
+        ) : earnings.length === 0 ? (
+          <div className="text-xs text-gray-400 py-6 text-center">
+            За выбранный период начислений нет
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-gray-100 text-gray-400">
+                  <th className="py-2.5 px-3 font-medium">Дата</th>
+                  <th className="py-2.5 px-3 font-medium">Тренер</th>
+                  <th className="py-2.5 px-3 font-medium text-center">Длит.</th>
+                  <th className="py-2.5 px-3 font-medium text-center">Учеников</th>
+                  <th className="py-2.5 px-3 font-medium text-center">Тип</th>
+                  <th className="py-2.5 px-3 font-medium text-right">Сумма</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50 text-gray-700">
+                {earnings.map((e) => {
+                  const t = teacherMap[e.teacher_id];
+                  return (
+                    <tr key={e.id} className="hover:bg-gray-50/50">
+                      <td className="py-3 px-3 text-gray-500 font-mono text-[11px]">
+                        {new Date(e.lesson_date).toLocaleDateString('ru-RU', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                        })}
+                      </td>
+                      <td className="py-3 px-3 font-medium text-gray-900">
+                        {t?.name || t?.email || '—'}
+                      </td>
+                      <td className="py-3 px-3 text-center">{e.duration_min}м</td>
+                      <td className="py-3 px-3 text-center">{e.student_count}</td>
+                      <td className="py-3 px-3 text-center text-[10px]">
+                        <span
+                          className={`px-2 py-0.5 rounded-full font-bold uppercase ${
+                            e.is_group
+                              ? 'bg-blue-50 text-blue-700'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {e.is_group ? 'Группа' : 'Индив.'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-right font-bold text-emerald-700">
+                        {e.amount.toLocaleString('ru-RU')} ₸
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+/* ============================================================
+   Вкладка 4: Админы (только для суперадмина)
    ============================================================ */
 const AdminsTab = () => {
   const [email, setEmail] = useState('');
@@ -891,10 +1187,19 @@ const AdminsTab = () => {
           Доступа к тренерам, ученикам и расписанию у него нет.
         </p>
 
-        {message && <div className="mb-4 p-3 bg-green-50 text-green-700 text-xs rounded-lg">{message}</div>}
-        {error && <div className="mb-4 p-3 bg-red-50 text-red-600 text-xs rounded-lg">{error}</div>}
+        {message && (
+          <div className="mb-4 p-3 bg-green-50 text-green-700 text-xs rounded-lg">
+            {message}
+          </div>
+        )}
+        {error && (
+          <div className="mb-4 p-3 bg-red-50 text-red-600 text-xs rounded-lg">{error}</div>
+        )}
 
-        <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
+        <form
+          onSubmit={handleCreate}
+          className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end"
+        >
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
             <input
@@ -950,7 +1255,9 @@ const AdminsTab = () => {
                 <div
                   key={a.id}
                   className={`flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between p-3 rounded-xl border ${
-                    isSuper ? 'bg-purple-50/50 border-purple-100' : 'bg-emerald-50/40 border-emerald-100'
+                    isSuper
+                      ? 'bg-purple-50/50 border-purple-100'
+                      : 'bg-emerald-50/40 border-emerald-100'
                   }`}
                 >
                   <div className="flex-1 min-w-0">
@@ -969,7 +1276,9 @@ const AdminsTab = () => {
                       </span>
                     </div>
                     {a.name && (
-                      <div className="text-[11px] text-gray-400 mt-0.5 truncate">{a.email}</div>
+                      <div className="text-[11px] text-gray-400 mt-0.5 truncate">
+                        {a.email}
+                      </div>
                     )}
                     <div className="text-[10px] text-gray-400 mt-0.5">
                       Создан: {new Date(a.created_at).toLocaleString('ru-RU')}
