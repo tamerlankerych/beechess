@@ -1,54 +1,22 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { JaaSMeeting } from '@jitsi/react-sdk';
-import { supabase } from './supabaseClient';
+import { memo, useCallback, useMemo } from 'react';
+import { JitsiMeeting } from '@jitsi/react-sdk';
 
-export const VideoRoom = memo(function VideoRoom({ lesson, isObserver = false, isTeacher = false }) {
-  const [meeting, setMeeting] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+export const VideoRoom = memo(function VideoRoom({ lesson, isObserver = false, isTeacher = false, user = {} }) {
+  if (!lesson?.id) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-gray-900 text-gray-300 text-xs">
+        Урок не найден
+      </div>
+    );
+  }
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadMeeting = async () => {
-      if (!lesson?.id) return;
-      setLoading(true);
-      setError('');
-
-      // Одна комната для всех, кто в этом уроке — по lesson.id
-      const roomName = `chess-lesson-${lesson.id}`;
-
-      const { data, error: functionError } = await supabase.functions.invoke('jitsi-token', {
-        body: { roomName, isModerator: !isObserver && isTeacher },
-      });
-
-      if (cancelled) return;
-
-      if (functionError || !data?.jwt || !data?.appId) {
-        console.error('Ошибка Jitsi JWT:', functionError || data);
-        setError('Не удалось подключиться к видеозвонку');
-        setLoading(false);
-        return;
-      }
-
-      setMeeting({
-        appId: data.appId,
-        roomName: data.roomName || roomName,
-        jwt: data.jwt,
-      });
-      setLoading(false);
-    };
-
-    loadMeeting();
-    return () => {
-      cancelled = true;
-    };
-  }, [lesson?.id, isObserver, isTeacher]);
+  // Название комнаты на вашем сервере
+  const roomName = `chess-lesson-${lesson.id}`;
 
   const configOverwrite = useMemo(
     () => ({
       p2p: { enabled: false },
-      prejoinConfig: { enabled: false },
+      prejoinPageEnabled: false,
       startWithAudioMuted: isObserver,
       startWithVideoMuted: isObserver,
       disableInviteFunctions: !isTeacher,
@@ -78,36 +46,16 @@ export const VideoRoom = memo(function VideoRoom({ lesson, isObserver = false, i
     iframe.allow = 'camera; microphone; display-capture; autoplay; fullscreen';
   }, []);
 
-  if (loading) {
-    return (
-      <div className="w-full h-full flex items-center justify-center bg-gray-900 text-gray-300 text-xs">
-        Подключение к видеозвонку...
-      </div>
-    );
-  }
-
-  if (error || !meeting) {
-    return (
-      <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-gray-900 text-gray-300 text-xs">
-        <p>{error || 'Видеозвонок недоступен'}</p>
-        <button
-          type="button"
-          onClick={() => window.location.reload()}
-          className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
-        >
-          Переподключиться
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <JaaSMeeting
-      appId={meeting.appId}
-      roomName={meeting.roomName}
-      jwt={meeting.jwt}
+    <JitsiMeeting
+      domain="meet.beechessacademy.com"
+      roomName={roomName}
       configOverwrite={configOverwrite}
       interfaceConfigOverwrite={interfaceConfigOverwrite}
+      userInfo={{
+        displayName: user?.name || (isTeacher ? 'Преподаватель' : 'Ученик'),
+        email: user?.email || '',
+      }}
       getIFrameRef={setIframe}
     />
   );
