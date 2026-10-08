@@ -856,10 +856,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         (payload) => {
           if (!payload.new) return;
 
-          // ВАЖНО: fen и move_tree здесь НЕ применяем.
-          // Их двигает только broadcast — он быстрее и не откатывает.
-          // Здесь только служебное: часы, разблокировка, смена цвета.
-
           if (payload.new.can_student_move !== undefined) {
             setCanStudentMove(payload.new.can_student_move);
             canStudentMoveRef.current = payload.new.can_student_move;
@@ -1363,10 +1359,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     });
   };
 
-  // ============================================================
-  // ОПТИМИЗИРОВАНО: обёрнуто в useMemo, чтобы не пересчитывать
-  // при каждом ре-рендере (тик часов, обновление состояния)
-  // ============================================================
   const moveNotationContent = useMemo(() => {
     const rootNode = tree.root;
     if (!rootNode || !rootNode.children?.length) {
@@ -1596,17 +1588,31 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                 </button>
               </div>
             )}
-            <div
-              ref={boardRef}
-              onClick={handleBoardClickForEditor}
-              onDragOver={(event) => {
-                if (isEditorMode) event.preventDefault();
-              }}
-              onDrop={handlePaletteDrop}
-              className={`w-full max-w-[660px] aspect-square rounded-xl border border-gray-200 overflow-hidden shadow-inner select-none ${
-                isEditorMode ? 'cursor-crosshair ring-2 ring-blue-500' : 'cursor-pointer'
-              }`}
-            />
+
+            {/* ============================================ */}
+            {/* ФИКС: квадратная доска через padding-bottom  */}
+            {/* Работает во всех браузерах                   */}
+            {/* ============================================ */}
+            <div className="w-full max-w-[660px]">
+              <div
+                className={`relative w-full rounded-xl border border-gray-200 overflow-hidden shadow-inner ${
+                  isEditorMode ? 'ring-2 ring-blue-500' : ''
+                }`}
+                style={{ paddingBottom: '100%' }}
+              >
+                <div
+                  ref={boardRef}
+                  onClick={handleBoardClickForEditor}
+                  onDragOver={(event) => {
+                    if (isEditorMode) event.preventDefault();
+                  }}
+                  onDrop={handlePaletteDrop}
+                  className={`absolute inset-0 select-none ${
+                    isEditorMode ? 'cursor-crosshair' : 'cursor-pointer'
+                  }`}
+                />
+              </div>
+            </div>
 
             {isTeacher && (
               <div className="w-full max-w-[660px] grid grid-cols-2 sm:grid-cols-3 gap-2">
