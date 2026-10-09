@@ -269,11 +269,25 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     [lesson?.id, lesson?.title]
   );
 
+  // ============================================================
+  // ФИКС 1: мгновенная очистка подсветок при запрете
+  // ============================================================
   const toggleStudentAccess = () => {
     const nextState = !canStudentMove;
     setCanStudentMove(nextState);
     canStudentMoveRef.current = nextState;
     saveState(gameRef.current.fen(), nextState);
+
+    // Если запрещаем — сразу снимаем подсветки и возможные ходы
+    if (nextState === false) {
+      try {
+        chessboardInstance.current?.removeLegalMovesMarkers();
+        chessboardInstance.current?.setPosition(gameRef.current.fen());
+      } catch {
+        // Игнорируем — доска может быть ещё не инициализирована
+      }
+    }
+
     channelRef.current?.send({
       type: 'broadcast',
       event: 'student_access',
@@ -790,7 +804,18 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           return false;
         }
 
-        if (isObserver || (!isTeacher && !canStudentMoveRef.current)) return false;
+        // ============================================================
+        // ФИКС 2: при запрете — возвращаем фигуру и не даём двигать
+        // ============================================================
+        if (isObserver || (!isTeacher && !canStudentMoveRef.current)) {
+          try {
+            chessboardInstance.current?.removeLegalMovesMarkers();
+            chessboardInstance.current?.setPosition(gameRef.current.fen());
+          } catch {
+            // Игнорируем
+          }
+          return false;
+        }
 
         if (event.type === 'moveInputStarted' && event.squareFrom) {
           const legalMoves = gameRef.current.moves({
@@ -856,9 +881,21 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         (payload) => {
           if (!payload.new) return;
 
+          // ============================================================
+          // ФИКС 3: при can_student_move = false сразу закрываем доступ
+          // ============================================================
           if (payload.new.can_student_move !== undefined) {
-            setCanStudentMove(payload.new.can_student_move);
-            canStudentMoveRef.current = payload.new.can_student_move;
+            const val = payload.new.can_student_move;
+            setCanStudentMove(val);
+            canStudentMoveRef.current = val;
+            if (val === false) {
+              try {
+                chessboardInstance.current?.removeLegalMovesMarkers();
+                chessboardInstance.current?.setPosition(gameRef.current.fen());
+              } catch {
+                // Игнорируем
+              }
+            }
           }
           if (payload.new.timer_w !== undefined) {
             timerWRef.current = payload.new.timer_w;
@@ -959,11 +996,23 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           setClockStarted(payload.clockStarted);
         }
       })
+      // ============================================================
+      // ФИКС 4: мгновенно закрываем при получении broadcast student_access
+      // ============================================================
       .on('broadcast', { event: 'student_access' }, ({ payload }) => {
         if (!payload) return;
         if (payload.canStudentMove !== undefined) {
-          setCanStudentMove(payload.canStudentMove);
-          canStudentMoveRef.current = payload.canStudentMove;
+          const val = payload.canStudentMove;
+          setCanStudentMove(val);
+          canStudentMoveRef.current = val;
+          if (val === false) {
+            try {
+              chessboardInstance.current?.removeLegalMovesMarkers();
+              chessboardInstance.current?.setPosition(gameRef.current.fen());
+            } catch {
+              // Игнорируем
+            }
+          }
         }
       })
       .on('broadcast', { event: 'board_orientation' }, ({ payload }) => {
@@ -1589,10 +1638,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
               </div>
             )}
 
-            {/* ============================================ */}
-            {/* ФИКС: квадратная доска через padding-bottom  */}
-            {/* Работает во всех браузерах                   */}
-            {/* ============================================ */}
             <div className="w-full max-w-[660px]">
               <div
                 className={`relative w-full rounded-xl border border-gray-200 overflow-hidden shadow-inner ${
