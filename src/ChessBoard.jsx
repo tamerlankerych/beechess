@@ -12,10 +12,12 @@ import { ChessPieceIcon } from './ChessPieceIcon.jsx';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
+const INITIAL_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
 const INITIAL_TREE = {
   root: {
     id: 'root',
-    fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    fen: INITIAL_FEN,
     san: '',
     parentId: null,
     children: [],
@@ -81,9 +83,7 @@ const formatSanWithIcons = (san) => {
 };
 
 const updateFenBoard = (currentFen, updaterFn) => {
-  const parts = (
-    currentFen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
-  ).split(' ');
+  const parts = (currentFen || INITIAL_FEN).split(' ');
   const boardPart = parts[0];
   const rows = boardPart.split('/');
   const board = [];
@@ -226,6 +226,45 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     editorCastling,
   ]);
 
+  // ============================================================
+  // Мгновенная запись в БД (без debounce).
+  // Используется для критичных событий: ход, разрешение/запрет
+  // ходов, сохранение позиции из редактора, загрузка материала.
+  // ============================================================
+  const saveStateInstant = useCallback(
+    async (overrides = {}) => {
+      if (!lesson?.id) return;
+
+      const payload = {
+        id: lesson.id,
+        title: lesson.title || 'Урок',
+        fen: overrides.fen ?? gameRef.current.fen(),
+        move_tree: overrides.moveTree ?? treeRef.current,
+        current_node_id: overrides.currentNodeId ?? currentIdRef.current,
+        can_student_move: overrides.canStudentMove ?? canStudentMoveRef.current,
+        timer_w: Math.round(timerWRef.current),
+        timer_b: Math.round(timerBRef.current),
+        increment_ms: incrementMsRef.current,
+        active_color: overrides.activeColor ?? activeColorRef.current,
+        clock_started: clockStartedRef.current,
+        clock_updated_at: new Date().toISOString(),
+      };
+
+      try {
+        const { error } = await supabase
+          .from('lessons')
+          .upsert(payload, { onConflict: 'id' });
+        if (error) throw error;
+      } catch (e) {
+        console.error('Ошибка мгновенного сохранения:', e);
+      }
+    },
+    [lesson?.id, lesson?.title]
+  );
+
+  // ============================================================
+  // Debounce-сохранение для часов (не критично, можно раз в 3 сек)
+  // ============================================================
   const saveState = useCallback(
     async (fen, studentCanMove, sharedState = {}) => {
       if (!lesson?.id) return;
@@ -264,29 +303,27 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         } catch (e) {
           console.error('Ошибка сохранения состояния:', e);
         }
-      }, 5000);
+      }, 3000);
     },
     [lesson?.id, lesson?.title]
   );
 
   // ============================================================
-  // ФИКС 1: мгновенная очистка подсветок при запрете
+  // Разрешить/запретить ходы — пишем в БД мгновенно
   // ============================================================
-  const toggleStudentAccess = () => {
+  const toggleStudentAccess = async () => {
     const nextState = !canStudentMove;
     setCanStudentMove(nextState);
     canStudentMoveRef.current = nextState;
-    saveState(gameRef.current.fen(), nextState);
 
-    // Если запрещаем — сразу снимаем подсветки и возможные ходы
     if (nextState === false) {
       try {
         chessboardInstance.current?.removeLegalMovesMarkers();
         chessboardInstance.current?.setPosition(gameRef.current.fen());
-      } catch {
-        // Игнорируем — доска может быть ещё не инициализирована
-      }
+      } catch {}
     }
+
+    await saveStateInstant({ canStudentMove: nextState });
 
     channelRef.current?.send({
       type: 'broadcast',
@@ -375,12 +412,12 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     setActiveColor('w');
     setClockStarted(false);
 
-    saveState(gameRef.current.fen(), canStudentMove, {
-      timer_w: totalMs,
-      timer_b: totalMs,
-      increment_ms: incMs,
-      active_color: 'w',
-      clock_started: false,
+    saveStateInstant({
+      timerW: totalMs,
+      timerB: totalMs,
+      incrementMs: incMs,
+      activeColor: 'w',
+      clockStarted: false,
     });
 
     channelRef.current?.send({
@@ -426,6 +463,9 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     });
   };
 
+  // ============================================================
+  // Материал из библиотеки — мгновенная запись + broadcast
+  // ============================================================
   const openMaterialPosition = async (material) => {
     if (!isTeacher || !material?.setup_fen) return;
 
@@ -463,9 +503,11 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       chessboardInstance.current?.removeMarkers();
       chessboardInstance.current?.removeArrows();
 
-      await saveState(preparedFen, canStudentMoveRef.current, {
+      await saveStateInstant({
+        fen: preparedFen,
         moveTree: nextTree,
         currentNodeId: 'root',
+        activeColor: preparedGame.turn(),
       });
 
       channelRef.current?.send({
@@ -507,7 +549,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           chessboardInstance.current.setPosition(targetNode.fen, true);
         }
 
-        saveState(targetNode.fen, canStudentMoveRef.current, {
+        saveStateInstant({
+          fen: targetNode.fen,
           moveTree: treeRef.current,
           currentNodeId: nodeId,
         });
@@ -525,7 +568,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         console.error('Ошибка FEN:', err);
       }
     },
-    [saveState]
+    [saveStateInstant]
   );
 
   useEffect(() => {
@@ -631,6 +674,10 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     []
   );
 
+  // ============================================================
+  // Ход — мгновенная запись в БД, чтобы ученик при заходе
+  // видел актуальную позицию
+  // ============================================================
   const executeMove = useCallback(
     (from, to, promotion = 'q') => {
       try {
@@ -639,7 +686,13 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
         const newFen = gameRef.current.fen();
         const sharedMoveState = applyRemoteMove(move, newFen);
-        saveState(newFen, canStudentMoveRef.current, sharedMoveState);
+
+        saveStateInstant({
+          fen: newFen,
+          moveTree: sharedMoveState.moveTree,
+          currentNodeId: sharedMoveState.currentNodeId,
+          activeColor: activeColorRef.current,
+        });
 
         channelRef.current?.send({
           type: 'broadcast',
@@ -666,7 +719,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         return false;
       }
     },
-    [applyRemoteMove, saveState]
+    [applyRemoteMove, saveStateInstant]
   );
 
   const choosePromotion = (promotion) => {
@@ -678,189 +731,231 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   useEffect(() => {
     if (!boardRef.current || !lesson?.id) return;
 
-    const initialFen =
-      lesson.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-    const initialTree = lesson.move_tree?.root
-      ? lesson.move_tree
-      : {
-          root: {
-            id: 'root',
-            fen: initialFen,
-            san: '',
-            parentId: null,
-            children: [],
-            color: initialFen.split(' ')[1] || 'w',
+    let cancelled = false;
+
+    const initFromDb = async () => {
+      // ============================================================
+      // ФИКС: при заходе читаем свежее состояние из БД.
+      // Не полагаемся на lesson (может быть устаревший снимок).
+      // ============================================================
+      let freshFen = lesson.fen || INITIAL_FEN;
+      let freshTree = lesson.move_tree?.root
+        ? lesson.move_tree
+        : {
+            root: {
+              id: 'root',
+              fen: freshFen,
+              san: '',
+              parentId: null,
+              children: [],
+              color: freshFen.split(' ')[1] || 'w',
+            },
+          };
+      let freshCurrentId = freshTree[lesson.current_node_id]
+        ? lesson.current_node_id
+        : 'root';
+
+      let freshTimerW = lesson.timer_w ?? 600000;
+      let freshTimerB = lesson.timer_b ?? 600000;
+      let freshClockStarted = lesson.clock_started ?? false;
+      let freshActiveColor = lesson.active_color || 'w';
+      let freshIncrementMs = lesson.increment_ms ?? 5000;
+      let freshClockUpdatedAt = lesson.clock_updated_at;
+      let freshCanStudentMove = lesson.can_student_move;
+
+      try {
+        const { data } = await supabase
+          .from('lessons')
+          .select(
+            'fen, move_tree, current_node_id, can_student_move, timer_w, timer_b, active_color, clock_started, increment_ms, clock_updated_at'
+          )
+          .eq('id', lesson.id)
+          .maybeSingle();
+
+        if (cancelled) return;
+
+        if (data) {
+          if (data.fen) freshFen = data.fen;
+          if (data.move_tree?.root) {
+            freshTree = data.move_tree;
+            freshCurrentId = freshTree[data.current_node_id]
+              ? data.current_node_id
+              : 'root';
+          }
+          if (data.can_student_move !== undefined) {
+            freshCanStudentMove = data.can_student_move;
+          }
+          if (data.timer_w !== undefined) freshTimerW = data.timer_w;
+          if (data.timer_b !== undefined) freshTimerB = data.timer_b;
+          if (data.active_color) freshActiveColor = data.active_color;
+          if (data.clock_started !== undefined) freshClockStarted = data.clock_started;
+          if (data.increment_ms !== undefined) freshIncrementMs = data.increment_ms;
+          if (data.clock_updated_at) freshClockUpdatedAt = data.clock_updated_at;
+        }
+      } catch (e) {
+        console.error('Ошибка получения свежего состояния урока:', e);
+      }
+
+      if (cancelled) return;
+
+      treeRef.current = freshTree;
+      currentIdRef.current = freshCurrentId;
+      setTree(freshTree);
+      setCurrentId(freshCurrentId);
+
+      try {
+        gameRef.current.load(freshFen, { skipValidation: true });
+      } catch {
+        gameRef.current.reset();
+      }
+
+      if (freshClockStarted && freshClockUpdatedAt) {
+        const elapsedMs = Math.max(
+          0,
+          Date.now() - new Date(freshClockUpdatedAt).getTime()
+        );
+        if (freshActiveColor === 'w')
+          freshTimerW = Math.max(0, freshTimerW - elapsedMs);
+        else freshTimerB = Math.max(0, freshTimerB - elapsedMs);
+
+        if (freshTimerW <= 0 || freshTimerB <= 0) freshClockStarted = false;
+      }
+
+      timerWRef.current = freshTimerW;
+      timerBRef.current = freshTimerB;
+      incrementMsRef.current = freshIncrementMs;
+      activeColorRef.current = freshActiveColor;
+      clockStartedRef.current = freshClockStarted;
+      setTimerW(freshTimerW);
+      setTimerB(freshTimerB);
+      setIncrementMs(freshIncrementMs);
+      setActiveColor(freshActiveColor);
+      setClockStarted(freshClockStarted);
+
+      if (freshCanStudentMove !== undefined) {
+        setCanStudentMove(freshCanStudentMove);
+        canStudentMoveRef.current = freshCanStudentMove;
+      }
+
+      if (chessboardInstance.current) {
+        chessboardInstance.current.destroy();
+      }
+
+      try {
+        chessboardInstance.current = new Chessboard(boardRef.current, {
+          position: gameRef.current.fen(),
+          orientation: orientation,
+          assetsUrl: '/assets/',
+          style: {
+            borderType: BORDER_TYPE.thin,
+            animationDuration: 150,
           },
-        };
-    const initialCurrentId = initialTree[lesson.current_node_id]
-      ? lesson.current_node_id
-      : 'root';
+          extensions: [
+            { class: Markers, props: { autoMarkers: null } },
+            { class: Arrows, props: { headSize: 5 } },
+          ],
+        });
 
-    treeRef.current = initialTree;
-    currentIdRef.current = initialCurrentId;
-    setTree(initialTree);
-    setCurrentId(initialCurrentId);
-
-    try {
-      gameRef.current.load(initialFen, { skipValidation: true });
-    } catch {
-      gameRef.current.reset();
-    }
-
-    let restoredTimerW = lesson.timer_w ?? 600000;
-    let restoredTimerB = lesson.timer_b ?? 600000;
-    let restoredClockStarted = lesson.clock_started ?? false;
-    const restoredActiveColor = lesson.active_color || 'w';
-    const restoredIncrementMs = lesson.increment_ms ?? 5000;
-
-    if (restoredClockStarted && lesson.clock_updated_at) {
-      const elapsedMs = Math.max(
-        0,
-        Date.now() - new Date(lesson.clock_updated_at).getTime()
-      );
-      if (restoredActiveColor === 'w')
-        restoredTimerW = Math.max(0, restoredTimerW - elapsedMs);
-      else restoredTimerB = Math.max(0, restoredTimerB - elapsedMs);
-
-      if (restoredTimerW <= 0 || restoredTimerB <= 0) restoredClockStarted = false;
-    }
-
-    timerWRef.current = restoredTimerW;
-    timerBRef.current = restoredTimerB;
-    incrementMsRef.current = restoredIncrementMs;
-    activeColorRef.current = restoredActiveColor;
-    clockStartedRef.current = restoredClockStarted;
-    setTimerW(restoredTimerW);
-    setTimerB(restoredTimerB);
-    setIncrementMs(restoredIncrementMs);
-    setActiveColor(restoredActiveColor);
-    setClockStarted(restoredClockStarted);
-    if (lesson.can_student_move !== undefined) {
-      setCanStudentMove(lesson.can_student_move);
-      canStudentMoveRef.current = lesson.can_student_move;
-    }
-
-    if (chessboardInstance.current) {
-      chessboardInstance.current.destroy();
-    }
-
-    try {
-      chessboardInstance.current = new Chessboard(boardRef.current, {
-        position: gameRef.current.fen(),
-        orientation: orientation,
-        assetsUrl: '/assets/',
-        style: {
-          borderType: BORDER_TYPE.thin,
-          animationDuration: 150,
-        },
-        extensions: [
-          { class: Markers, props: { autoMarkers: null } },
-          { class: Arrows, props: { headSize: 5 } },
-        ],
-      });
-
-      chessboardInstance.current.enableMoveInput((event) => {
-        if (isEditorModeRef.current) {
-          if (event.type === 'moveInputStarted') return true;
-          if (event.type === 'moveInputFinished' && event.squareFrom && !event.squareTo) {
-            const fromFile = event.squareFrom.charCodeAt(0) - 97;
-            const fromRank = 8 - parseInt(event.squareFrom[1]);
-            const updated = updateFenBoard(tempEditorFenRef.current, (board) => {
-              board[fromRank][fromFile] = null;
-            });
-            const fullUpdatedFen = buildFullFen(
-              updated,
-              editorTurnRef.current,
-              editorCastlingRef.current
-            );
-            tempEditorFenRef.current = fullUpdatedFen;
-            setTempEditorFen(fullUpdatedFen);
-            chessboardInstance.current?.setPosition(fullUpdatedFen, false);
-            return false;
-          }
-          if (event.type === 'moveInputFinished' && event.squareFrom && event.squareTo) {
-            const fromFile = event.squareFrom.charCodeAt(0) - 97;
-            const fromRank = 8 - parseInt(event.squareFrom[1]);
-            const toFile = event.squareTo.charCodeAt(0) - 97;
-            const toRank = 8 - parseInt(event.squareTo[1]);
-
-            const updated = updateFenBoard(tempEditorFenRef.current, (board) => {
-              const piece = board[fromRank][fromFile];
-              board[fromRank][fromFile] = null;
-              board[toRank][toFile] = piece;
-            });
-
-            const fullUpdatedFen = buildFullFen(
-              updated,
-              editorTurnRef.current,
-              editorCastlingRef.current
-            );
-            tempEditorFenRef.current = fullUpdatedFen;
-            setTempEditorFen(fullUpdatedFen);
-            if (chessboardInstance.current) {
-              chessboardInstance.current.setPosition(fullUpdatedFen, false);
+        chessboardInstance.current.enableMoveInput((event) => {
+          if (isEditorModeRef.current) {
+            if (event.type === 'moveInputStarted') return true;
+            if (event.type === 'moveInputFinished' && event.squareFrom && !event.squareTo) {
+              const fromFile = event.squareFrom.charCodeAt(0) - 97;
+              const fromRank = 8 - parseInt(event.squareFrom[1]);
+              const updated = updateFenBoard(tempEditorFenRef.current, (board) => {
+                board[fromRank][fromFile] = null;
+              });
+              const fullUpdatedFen = buildFullFen(
+                updated,
+                editorTurnRef.current,
+                editorCastlingRef.current
+              );
+              tempEditorFenRef.current = fullUpdatedFen;
+              setTempEditorFen(fullUpdatedFen);
+              chessboardInstance.current?.setPosition(fullUpdatedFen, false);
+              return false;
             }
-          }
-          return false;
-        }
+            if (event.type === 'moveInputFinished' && event.squareFrom && event.squareTo) {
+              const fromFile = event.squareFrom.charCodeAt(0) - 97;
+              const fromRank = 8 - parseInt(event.squareFrom[1]);
+              const toFile = event.squareTo.charCodeAt(0) - 97;
+              const toRank = 8 - parseInt(event.squareTo[1]);
 
-        // ============================================================
-        // ФИКС 2: при запрете — возвращаем фигуру и не даём двигать
-        // ============================================================
-        if (isObserver || (!isTeacher && !canStudentMoveRef.current)) {
-          try {
-            chessboardInstance.current?.removeLegalMovesMarkers();
-            chessboardInstance.current?.setPosition(gameRef.current.fen());
-          } catch {
-            // Игнорируем
-          }
-          return false;
-        }
+              const updated = updateFenBoard(tempEditorFenRef.current, (board) => {
+                const piece = board[fromRank][fromFile];
+                board[fromRank][fromFile] = null;
+                board[toRank][toFile] = piece;
+              });
 
-        if (event.type === 'moveInputStarted' && event.squareFrom) {
-          const legalMoves = gameRef.current.moves({
-            square: event.squareFrom,
-            verbose: true,
-          });
-
-          event.chessboard.removeLegalMovesMarkers();
-
-          if (legalMoves.length === 0) return false;
-
-          event.chessboard.addLegalMovesMarkers(legalMoves);
-          return true;
-        }
-
-        if (event.type === 'moveInputCanceled') {
-          chessboardInstance.current?.removeLegalMovesMarkers();
-          return false;
-        }
-
-        if (event.type === 'moveInputFinished' && event.squareFrom && event.squareTo) {
-          chessboardInstance.current?.removeLegalMovesMarkers();
-          const piece = gameRef.current.get(event.squareFrom);
-          const reachesLastRank =
-            piece?.type === 'p' &&
-            ((piece.color === 'w' && event.squareTo[1] === '8') ||
-              (piece.color === 'b' && event.squareTo[1] === '1'));
-
-          if (reachesLastRank) {
-            setPendingPromotion({
-              from: event.squareFrom,
-              to: event.squareTo,
-              color: piece.color,
-            });
-            chessboardInstance.current?.setPosition(gameRef.current.fen());
+              const fullUpdatedFen = buildFullFen(
+                updated,
+                editorTurnRef.current,
+                editorCastlingRef.current
+              );
+              tempEditorFenRef.current = fullUpdatedFen;
+              setTempEditorFen(fullUpdatedFen);
+              if (chessboardInstance.current) {
+                chessboardInstance.current.setPosition(fullUpdatedFen, false);
+              }
+            }
             return false;
           }
 
-          return executeMove(event.squareFrom, event.squareTo);
-        }
-        return true;
-      });
-    } catch (err) {
-      console.error('Ошибка инициализации cm-chessboard:', err);
-    }
+          if (isObserver || (!isTeacher && !canStudentMoveRef.current)) {
+            try {
+              chessboardInstance.current?.removeLegalMovesMarkers();
+              chessboardInstance.current?.setPosition(gameRef.current.fen());
+            } catch {}
+            return false;
+          }
+
+          if (event.type === 'moveInputStarted' && event.squareFrom) {
+            const legalMoves = gameRef.current.moves({
+              square: event.squareFrom,
+              verbose: true,
+            });
+
+            event.chessboard.removeLegalMovesMarkers();
+
+            if (legalMoves.length === 0) return false;
+
+            event.chessboard.addLegalMovesMarkers(legalMoves);
+            return true;
+          }
+
+          if (event.type === 'moveInputCanceled') {
+            chessboardInstance.current?.removeLegalMovesMarkers();
+            return false;
+          }
+
+          if (event.type === 'moveInputFinished' && event.squareFrom && event.squareTo) {
+            chessboardInstance.current?.removeLegalMovesMarkers();
+            const piece = gameRef.current.get(event.squareFrom);
+            const reachesLastRank =
+              piece?.type === 'p' &&
+              ((piece.color === 'w' && event.squareTo[1] === '8') ||
+                (piece.color === 'b' && event.squareTo[1] === '1'));
+
+            if (reachesLastRank) {
+              setPendingPromotion({
+                from: event.squareFrom,
+                to: event.squareTo,
+                color: piece.color,
+              });
+              chessboardInstance.current?.setPosition(gameRef.current.fen());
+              return false;
+            }
+
+            return executeMove(event.squareFrom, event.squareTo);
+          }
+          return true;
+        });
+      } catch (err) {
+        console.error('Ошибка инициализации cm-chessboard:', err);
+      }
+    };
+
+    initFromDb();
 
     let channelCancelled = false;
     const channel = supabase.channel(`lesson-${lesson.id}`, {
@@ -882,7 +977,11 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           if (!payload.new) return;
 
           // ============================================================
-          // ФИКС 3: при can_student_move = false сразу закрываем доступ
+          // ФИКС ТАЙМЕРА: обрабатываем только can_student_move.
+          // timer_w / timer_b / active_color / clock_started /
+          // increment_ms двигает только broadcast — иначе
+          // postgres_changes (с задержкой 3 сек) перезапишет
+          // актуальные часы устаревшими данными и они "скачут".
           // ============================================================
           if (payload.new.can_student_move !== undefined) {
             const val = payload.new.can_student_move;
@@ -892,34 +991,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
               try {
                 chessboardInstance.current?.removeLegalMovesMarkers();
                 chessboardInstance.current?.setPosition(gameRef.current.fen());
-              } catch {
-                // Игнорируем
-              }
+              } catch {}
             }
-          }
-          if (payload.new.timer_w !== undefined) {
-            timerWRef.current = payload.new.timer_w;
-            setTimerW(payload.new.timer_w);
-            if (whiteClockDomRef.current)
-              whiteClockDomRef.current.textContent = formatTime(payload.new.timer_w);
-          }
-          if (payload.new.timer_b !== undefined) {
-            timerBRef.current = payload.new.timer_b;
-            setTimerB(payload.new.timer_b);
-            if (blackClockDomRef.current)
-              blackClockDomRef.current.textContent = formatTime(payload.new.timer_b);
-          }
-          if (payload.new.active_color !== undefined) {
-            activeColorRef.current = payload.new.active_color;
-            setActiveColor(payload.new.active_color);
-          }
-          if (payload.new.clock_started !== undefined) {
-            clockStartedRef.current = payload.new.clock_started;
-            setClockStarted(payload.new.clock_started);
-          }
-          if (payload.new.increment_ms !== undefined) {
-            incrementMsRef.current = payload.new.increment_ms;
-            setIncrementMs(payload.new.increment_ms);
           }
         }
       )
@@ -978,10 +1051,14 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         if (payload.timerW !== undefined) {
           timerWRef.current = payload.timerW;
           setTimerW(payload.timerW);
+          if (whiteClockDomRef.current)
+            whiteClockDomRef.current.textContent = formatTime(payload.timerW);
         }
         if (payload.timerB !== undefined) {
           timerBRef.current = payload.timerB;
           setTimerB(payload.timerB);
+          if (blackClockDomRef.current)
+            blackClockDomRef.current.textContent = formatTime(payload.timerB);
         }
         if (payload.incrementMs !== undefined) {
           incrementMsRef.current = payload.incrementMs;
@@ -996,9 +1073,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           setClockStarted(payload.clockStarted);
         }
       })
-      // ============================================================
-      // ФИКС 4: мгновенно закрываем при получении broadcast student_access
-      // ============================================================
       .on('broadcast', { event: 'student_access' }, ({ payload }) => {
         if (!payload) return;
         if (payload.canStudentMove !== undefined) {
@@ -1009,9 +1083,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             try {
               chessboardInstance.current?.removeLegalMovesMarkers();
               chessboardInstance.current?.setPosition(gameRef.current.fen());
-            } catch {
-              // Игнорируем
-            }
+            } catch {}
           }
         }
       })
@@ -1058,6 +1130,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       });
 
     return () => {
+      cancelled = true;
       channelCancelled = true;
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
@@ -1143,14 +1216,16 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   const handleResetEditor = () => {
     setEditorTurn('w');
     setEditorCastling('KQkq');
-    const defaultFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-    setTempEditorFen(defaultFen);
+    setTempEditorFen(INITIAL_FEN);
     if (chessboardInstance.current) {
-      chessboardInstance.current.setPosition(defaultFen, false);
+      chessboardInstance.current.setPosition(INITIAL_FEN, false);
     }
   };
 
-  const handleSaveEditorPosition = () => {
+  // ============================================================
+  // Сохранение позиции из редактора — мгновенно в БД + broadcast
+  // ============================================================
+  const handleSaveEditorPosition = async () => {
     const boardOnly = updateFenBoard(tempEditorFen, () => {});
     const finalFen = buildFullFen(boardOnly, editorTurn, editorCastling);
 
@@ -1178,9 +1253,11 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       setSelectedEditorPiece(null);
       setActiveColor(editorTurn);
 
-      saveState(finalFen, canStudentMove, {
+      await saveStateInstant({
+        fen: finalFen,
         moveTree: newTree,
         currentNodeId: 'root',
+        activeColor: editorTurn,
       });
 
       if (channelRef.current) {
@@ -1392,7 +1469,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       console.error('Ошибка навигации после удаления хода:', error);
     }
 
-    saveState(nextCurrentNode.fen, canStudentMoveRef.current, {
+    saveStateInstant({
+      fen: nextCurrentNode.fen,
       moveTree: nextTree,
       currentNodeId: nextCurrentNode.id,
     });

@@ -684,7 +684,6 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
 
   const weekTitle = `${weekStart.getDate()}.${String(weekStart.getMonth() + 1).padStart(2, '0')} – ${weekEnd.getDate()}.${String(weekEnd.getMonth() + 1).padStart(2, '0')}`;
 
-  // Тренер может начать урок всегда, если статус scheduled
   const canStartLesson = (lesson) => lesson.status === 'scheduled';
 
   const markLessonDone = async (lesson, attendance) => {
@@ -1230,8 +1229,67 @@ const LessonEditor = ({
         created_by: userId,
       }));
 
-      const { error: insErr } = await supabase.from('crm_lessons').insert(rows);
+      // ============================================================
+      // ФИКС ПРОБНЫХ УРОКОВ:
+      // Сохраняем crm_lessons и СРАЗУ создаём чистую запись в lessons
+      // ТОЛЬКО если её ещё нет. Существующие партии не трогаем.
+      // ============================================================
+      const { data: inserted, error: insErr } = await supabase
+        .from('crm_lessons')
+        .insert(rows)
+        .select();
       if (insErr) throw insErr;
+
+      if (inserted && inserted.length) {
+        const lessonStates = inserted.map((l) => {
+          const ids = l.student_ids || [];
+          const isIndividual = ids.length === 1;
+          const lessonId = isIndividual ? ids[0] : l.id;
+
+          return {
+            id: lessonId,
+            title: isIndividual ? 'Урок' : `Группа (${ids.length})`,
+            fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+            move_tree: {
+              root: {
+                id: 'root',
+                fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+                san: '',
+                parentId: null,
+                children: [],
+                color: 'w',
+              },
+            },
+            current_node_id: 'root',
+            can_student_move: false,
+            timer_w: 600000,
+            timer_b: 600000,
+            increment_ms: 5000,
+            active_color: 'w',
+            clock_started: false,
+            clock_updated_at: new Date().toISOString(),
+          };
+        });
+
+        // Оставляем уникальные lessonId
+        const uniqueStates = Object.values(
+          Object.fromEntries(lessonStates.map((s) => [s.id, s]))
+        );
+
+        // Какие уже есть в lessons — не перезаписываем
+        const ids = uniqueStates.map((s) => s.id);
+        const { data: existing } = await supabase
+          .from('lessons')
+          .select('id')
+          .in('id', ids);
+
+        const existingIds = new Set((existing || []).map((r) => r.id));
+        const toInsert = uniqueStates.filter((s) => !existingIds.has(s.id));
+
+        if (toInsert.length) {
+          await supabase.from('lessons').insert(toInsert);
+        }
+      }
 
       onSaved?.();
     } catch (err) {
