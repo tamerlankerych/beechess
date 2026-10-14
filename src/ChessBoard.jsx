@@ -822,7 +822,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
       try {
         chessboardInstance.current = new Chessboard(boardRef.current, {
-          position: gameRef.current.fen(),
+          position: freshFen, // Убедились, что инициализируем с актуальным FEN из базы
           orientation: orientation,
           assetsUrl: '/assets/',
           style: {
@@ -834,6 +834,9 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             { class: Arrows, props: { headSize: 5 } },
           ],
         });
+
+        // Принудительно ставим позицию на доску
+        chessboardInstance.current.setPosition(freshFen, false);
 
         chessboardInstance.current.enableMoveInput((event) => {
           if (isEditorModeRef.current) {
@@ -967,7 +970,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             }
           }
 
-          // Синхронизация при позднем входе или обновлении из БД
           if (payload.new.fen && payload.new.fen !== gameRef.current.fen()) {
             const newFen = payload.new.fen;
             gameRef.current.load(newFen, { skipValidation: true });
