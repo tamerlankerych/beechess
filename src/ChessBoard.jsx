@@ -226,11 +226,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     editorCastling,
   ]);
 
-  // ============================================================
-  // Мгновенная запись в БД (без debounce).
-  // Используется для критичных событий: ход, разрешение/запрет
-  // ходов, сохранение позиции из редактора, загрузка материала.
-  // ============================================================
   const saveStateInstant = useCallback(
     async (overrides = {}) => {
       if (!lesson?.id) return;
@@ -262,9 +257,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     [lesson?.id, lesson?.title]
   );
 
-  // ============================================================
-  // Debounce-сохранение для часов (не критично, можно раз в 3 сек)
-  // ============================================================
   const saveState = useCallback(
     async (fen, studentCanMove, sharedState = {}) => {
       if (!lesson?.id) return;
@@ -308,9 +300,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     [lesson?.id, lesson?.title]
   );
 
-  // ============================================================
-  // Разрешить/запретить ходы — пишем в БД мгновенно
-  // ============================================================
   const toggleStudentAccess = async () => {
     const nextState = !canStudentMove;
     setCanStudentMove(nextState);
@@ -463,9 +452,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     });
   };
 
-  // ============================================================
-  // Материал из библиотеки — мгновенная запись + broadcast
-  // ============================================================
   const openMaterialPosition = async (material) => {
     if (!isTeacher || !material?.setup_fen) return;
 
@@ -674,10 +660,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     []
   );
 
-  // ============================================================
-  // Ход — мгновенная запись в БД, чтобы ученик при заходе
-  // видел актуальную позицию
-  // ============================================================
   const executeMove = useCallback(
     (from, to, promotion = 'q') => {
       try {
@@ -728,16 +710,13 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     setPendingPromotion(null);
     executeMove(from, to, promotion);
   };
+
   useEffect(() => {
     if (!boardRef.current || !lesson?.id) return;
 
     let cancelled = false;
 
     const initFromDb = async () => {
-      // ============================================================
-      // ФИКС: при заходе читаем свежее состояние из БД.
-      // Не полагаемся на lesson (может быть устаревший снимок).
-      // ============================================================
       let freshFen = lesson.fen || INITIAL_FEN;
       let freshTree = lesson.move_tree?.root
         ? lesson.move_tree
@@ -976,13 +955,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         (payload) => {
           if (!payload.new) return;
 
-          // ============================================================
-          // ФИКС ТАЙМЕРА: обрабатываем только can_student_move.
-          // timer_w / timer_b / active_color / clock_started /
-          // increment_ms двигает только broadcast — иначе
-          // postgres_changes (с задержкой 3 сек) перезапишет
-          // актуальные часы устаревшими данными и они "скачут".
-          // ============================================================
           if (payload.new.can_student_move !== undefined) {
             const val = payload.new.can_student_move;
             setCanStudentMove(val);
@@ -992,6 +964,25 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                 chessboardInstance.current?.removeLegalMovesMarkers();
                 chessboardInstance.current?.setPosition(gameRef.current.fen());
               } catch {}
+            }
+          }
+
+          // Синхронизация при позднем входе или обновлении из БД
+          if (payload.new.fen && payload.new.fen !== gameRef.current.fen()) {
+            const newFen = payload.new.fen;
+            gameRef.current.load(newFen, { skipValidation: true });
+            if (chessboardInstance.current) {
+              chessboardInstance.current.setPosition(newFen, true);
+            }
+
+            if (payload.new.move_tree?.root) {
+              const syncedCurrentId = payload.new.move_tree[payload.new.current_node_id]
+                ? payload.new.current_node_id
+                : 'root';
+              treeRef.current = payload.new.move_tree;
+              currentIdRef.current = syncedCurrentId;
+              setTree(payload.new.move_tree);
+              setCurrentId(syncedCurrentId);
             }
           }
         }
@@ -1222,9 +1213,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     }
   };
 
-  // ============================================================
-  // Сохранение позиции из редактора — мгновенно в БД + broadcast
-  // ============================================================
   const handleSaveEditorPosition = async () => {
     const boardOnly = updateFenBoard(tempEditorFen, () => {});
     const finalFen = buildFullFen(boardOnly, editorTurn, editorCastling);
@@ -1347,9 +1335,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             const fullUpdatedFen = buildFullFen(updated, editorTurn, editorCastling);
             setTempEditorFen(fullUpdatedFen);
             chessboardInstance.current.setPosition(fullUpdatedFen, false);
-          } catch {
-            // Если редактирование не удалось, оставляем текущую позицию
-          }
+          } catch {}
         } else if (!isEditorModeRef.current && startSquare && endSquare) {
           if (startSquare === endSquare) {
             const existing = chessboardInstance.current.getMarkers(
