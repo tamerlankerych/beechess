@@ -621,6 +621,11 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
         { event: '*', schema: 'public', table: 'crm_lessons' },
         () => fetchAll()
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'group_members' },
+        () => fetchAll()
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
@@ -670,7 +675,24 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
 
+  // ============================================================
+  // ФИКС: получаем АКТУАЛЬНЫХ участников урока.
+  // Для групповых — берём живых членов группы, а не снимок
+  // student_ids, чтобы новые ученики сразу попадали в урок.
+  // ============================================================
+  const getLiveParticipants = (lesson) => {
+    if (lesson.group_id) {
+      const grp = groups.find((g) => g.id === lesson.group_id);
+      if (grp) return grp.memberIds || [];
+    }
+    return lesson.student_ids || [];
+  };
+
   const getLessonLabel = (lesson) => {
+    if (lesson.group_id) {
+      const grp = groups.find((g) => g.id === lesson.group_id);
+      if (grp) return `${grp.name} (${grp.memberIds.length})`;
+    }
     if (lesson.is_group) {
       const grp = groups.find((g) =>
         g.memberIds.some((m) => lesson.student_ids.includes(m))
@@ -698,7 +720,9 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
         .eq('id', lesson.id);
       if (error) throw error;
 
-      const attendees = lesson.student_ids.filter(
+      // ФИКС: списываем с живых участников (актуальный состав группы)
+      const participants = getLiveParticipants(lesson);
+      const attendees = participants.filter(
         (sid) => attendance[sid] !== false
       );
 
@@ -925,7 +949,9 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
           lesson={detailsLesson}
           students={students}
           subs={subs}
+          groups={groups}
           getLessonLabel={getLessonLabel}
+          getLiveParticipants={getLiveParticipants}
           formatTime={formatTime}
           canStart={canStartLesson(detailsLesson)}
           onClose={() => setDetailsLesson(null)}
@@ -959,6 +985,221 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
           }}
         />
       )}
+    </div>
+  );
+};
+
+/* ============================================================
+   Модалка: детали урока
+   ============================================================ */
+const LessonDetailsModal = ({
+  lesson,
+  students,
+  subs,
+  groups,
+  getLessonLabel,
+  getLiveParticipants,
+  formatTime,
+  canStart,
+  onClose,
+  onDelete,
+  onStart,
+  onRevert,
+  onMarkDone,
+  onMarkSkipped,
+  onMarkCancelled,
+}) => {
+  const [attendance, setAttendance] = useState(() => ({ ...(lesson.attendance || {}) }));
+  const studentMap = useMemo(() => {
+    const m = {};
+    students.forEach((s) => (m[s.id] = s));
+    return m;
+  }, [students]);
+
+  const isPast = new Date(lesson.ends_at) < new Date();
+
+  // Живые участники урока (для группы — актуальный состав)
+  const participants = getLiveParticipants ? getLiveParticipants(lesson) : (lesson.student_ids || []);
+
+  const toggleAttendance = (studentId) => {
+    setAttendance((prev) => {
+      const next = { ...prev };
+      const current = next[studentId] === undefined ? true : next[studentId];
+      next[studentId] = !current;
+      return next;
+    });
+  };
+
+  const isAttended = (studentId) => {
+    if (attendance[studentId] === undefined) return true;
+    return attendance[studentId] === true;
+  };
+
+  const label = getLessonLabel(lesson);
+
+  const statusBadge = (() => {
+    if (lesson.status === 'done')
+      return { text: '✓ Проведён', cls: 'bg-blue-50 text-blue-700' };
+    if (lesson.status === 'cancelled')
+      return { text: 'Отменён', cls: 'bg-slate-100 text-slate-500' };
+    if (lesson.status === 'skipped')
+      return { text: '⊘ Не проведён', cls: 'bg-amber-50 text-amber-700' };
+    if (isPast) return { text: '! Не отмечен', cls: 'bg-red-50 text-red-700' };
+    return { text: 'Запланирован', cls: 'bg-emerald-50 text-emerald-700' };
+  })();
+
+  const canMark = lesson.status === 'scheduled';
+  const canRevert = lesson.status === 'done';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+      <div className="w-full max-w-md bg-white rounded-2xl border border-gray-200 shadow-2xl p-6 max-h-[92vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <div className="text-lg font-bold text-gray-900">{label}</div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              {new Date(lesson.starts_at).toLocaleDateString('ru-RU', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+              })}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-700 text-xl cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="flex flex-wrap gap-2 mb-4 text-xs">
+          <span className={`px-2.5 py-1 rounded-full font-bold ${statusBadge.cls}`}>
+            {statusBadge.text}
+          </span>
+          <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-semibold">
+            {formatTime(lesson.starts_at)} – {formatTime(lesson.ends_at)}
+          </span>
+          <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-semibold">
+            {lesson.group_id || lesson.is_group ? 'Групповой' : 'Индивидуальный'}
+          </span>
+          {lesson.recurring_group_id && (
+            <span className="px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 font-semibold">
+              🔁 Постоянный
+            </span>
+          )}
+        </div>
+
+        {participants.length > 0 && (
+          <div className="mb-4">
+            <div className="text-xs font-bold text-gray-700 mb-2">
+              {canMark ? 'Кто пришёл (снимите галочку, если не был)' : 'Участники'}
+            </div>
+            <div className="space-y-1">
+              {participants.map((sid) => {
+                const s = studentMap[sid];
+                if (!s) return null;
+                const attended = isAttended(sid);
+                const balance = subs[sid] ?? 0;
+                return (
+                  <label
+                    key={sid}
+                    className={`flex items-center gap-2.5 p-2 rounded-lg text-sm ${
+                      canMark ? 'cursor-pointer' : ''
+                    } ${
+                      attended
+                        ? 'bg-emerald-50 border border-emerald-100'
+                        : 'bg-red-50 border border-red-100'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={attended}
+                      onChange={() => canMark && toggleAttendance(sid)}
+                      disabled={!canMark}
+                      className="w-4 h-4"
+                    />
+                    <span className="font-medium text-gray-800 flex-1">
+                      {s.name || s.email}
+                    </span>
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                        balance < 0
+                          ? 'bg-red-100 text-red-700'
+                          : balance === 0
+                          ? 'bg-slate-100 text-slate-500'
+                          : 'bg-emerald-100 text-emerald-700'
+                      }`}
+                      title="Осталось занятий"
+                    >
+                      {balance} ост.
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            {canMark && (
+              <div className="mt-2 text-[11px] text-gray-500">
+                При проведении урока с каждого отмеченного спишется 1 занятие.
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {canRevert && (
+            <button
+              onClick={onRevert}
+              className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-700 font-bold rounded-xl text-sm cursor-pointer border border-red-200"
+            >
+              ↩️ Отменить проведение
+            </button>
+          )}
+
+          {canMark && canStart && (
+            <button
+              onClick={() => onStart?.()}
+              className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-sm cursor-pointer"
+            >
+              ▶ Начать урок
+            </button>
+          )}
+
+          {canMark && (
+            <button
+              onClick={() => onMarkDone?.(attendance)}
+              className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm cursor-pointer"
+            >
+              ✓ Провести урок (списать занятие)
+            </button>
+          )}
+
+          {canMark && (
+            <button
+              onClick={() => onMarkSkipped?.()}
+              className="w-full py-2.5 bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold rounded-xl text-sm cursor-pointer"
+            >
+              ⊘ Не проведён (не списывать)
+            </button>
+          )}
+
+          {canMark && !isPast && (
+            <button
+              onClick={onMarkCancelled}
+              className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm cursor-pointer"
+            >
+              ✕ Отменить урок
+            </button>
+          )}
+
+          <button
+            onClick={onDelete}
+            className="w-full py-2 bg-red-50 hover:bg-red-100 text-red-600 font-semibold rounded-xl text-sm cursor-pointer"
+          >
+            🗑 Удалить урок
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
@@ -1054,7 +1295,9 @@ const LessonEditor = ({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const isGroup = selectedStudentIds.length > 1;
+  // Формат урока определяется РЕЖИМОМ, а не числом учеников
+  const isGroupMode = attendeeMode === 'group' && !!selectedGroupId;
+  const isGroup = isGroupMode || selectedStudentIds.length > 1;
   const durationMin = endHour * 60 + endMinute - (startHour * 60 + startMinute);
 
   useEffect(() => {
@@ -1176,7 +1419,7 @@ const LessonEditor = ({
   const handleSave = async () => {
     setError('');
 
-    if (selectedStudentIds.length === 0) {
+    if (selectedStudentIds.length === 0 && !selectedGroupId) {
       setError('Выберите ученика или группу');
       return;
     }
@@ -1217,10 +1460,29 @@ const LessonEditor = ({
           ? crypto.randomUUID()
           : null;
 
+      // ============================================================
+      // ФИКС ГРУПП:
+      // Если выбран режим «👥 Группа» — урок привязывается к
+      // group_id, даже если в ней 1 ученик. Тогда:
+      //  - is_group: true всегда
+      //  - новые члены группы автоматически попадают во все уроки
+      //  - ссылка ?room=group-<id> одна и не меняется
+      // ============================================================
+      const groupMemberIds = isGroupMode
+        ? groups.find((g) => g.id === selectedGroupId)?.memberIds || selectedStudentIds
+        : null;
+
+      const finalStudentIds = isGroupMode
+        ? (groupMemberIds && groupMemberIds.length > 0 ? groupMemberIds : selectedStudentIds)
+        : selectedStudentIds;
+
+      const finalIsGroup = isGroupMode || selectedStudentIds.length > 1;
+
       const rows = occurrences.map((occ) => ({
         teacher_id: userId,
-        student_ids: selectedStudentIds,
-        is_group: isGroup,
+        student_ids: finalStudentIds,
+        is_group: finalIsGroup,
+        group_id: isGroupMode ? selectedGroupId : null,
         starts_at: occ.s.toISOString(),
         ends_at: occ.e.toISOString(),
         status: 'scheduled',
@@ -1229,26 +1491,36 @@ const LessonEditor = ({
         created_by: userId,
       }));
 
-      // ============================================================
-      // ФИКС ПРОБНЫХ УРОКОВ:
-      // Сохраняем crm_lessons и СРАЗУ создаём чистую запись в lessons
-      // ТОЛЬКО если её ещё нет. Существующие партии не трогаем.
-      // ============================================================
       const { data: inserted, error: insErr } = await supabase
         .from('crm_lessons')
         .insert(rows)
         .select();
       if (insErr) throw insErr;
 
+      // ============================================================
+      // Создаём чистую запись в lessons для НОВЫХ уроков
+      // (существующие партии не трогаем)
+      // ============================================================
       if (inserted && inserted.length) {
         const lessonStates = inserted.map((l) => {
           const ids = l.student_ids || [];
-          const isIndividual = ids.length === 1;
-          const lessonId = isIndividual ? ids[0] : l.id;
+          // Для привязанной к группе — используем id группы
+          // Для индивидуального с одним учеником — id ученика
+          // Для остальных групповых — id crm-урока
+          let lessonId;
+          if (l.group_id) {
+            lessonId = l.group_id;
+          } else if (ids.length === 1) {
+            lessonId = ids[0];
+          } else {
+            lessonId = l.id;
+          }
 
           return {
             id: lessonId,
-            title: isIndividual ? 'Урок' : `Группа (${ids.length})`,
+            title: l.group_id
+              ? 'Групповой урок'
+              : (ids.length === 1 ? 'Урок' : `Группа (${ids.length})`),
             fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
             move_tree: {
               root: {
@@ -1271,12 +1543,12 @@ const LessonEditor = ({
           };
         });
 
-        // Оставляем уникальные lessonId
+        // Оставляем уникальные id
         const uniqueStates = Object.values(
           Object.fromEntries(lessonStates.map((s) => [s.id, s]))
         );
 
-        // Какие уже есть в lessons — не перезаписываем
+        // Не перезаписываем существующие записи
         const ids = uniqueStates.map((s) => s.id);
         const { data: existing } = await supabase
           .from('lessons')
@@ -1438,6 +1710,9 @@ const LessonEditor = ({
                         return s ? s.name || s.email : '?';
                       })
                       .join(', ') || 'пусто'}
+                    <div className="text-[10px] text-emerald-600 mt-1">
+                      ✓ Все изменения состава группы автоматически попадут в этот урок
+                    </div>
                   </div>
                 )}
               </>
@@ -1583,6 +1858,9 @@ const LessonEditor = ({
           </div>
           <div>
             <strong>Формат:</strong> {isGroup ? 'Групповой' : 'Индивидуальный'}
+            {isGroupMode && (
+              <span className="text-emerald-600 ml-1">(привязан к группе)</span>
+            )}
           </div>
           <div>
             <strong>Длительность:</strong>{' '}
@@ -1605,216 +1883,6 @@ const LessonEditor = ({
             className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-sm cursor-pointer disabled:opacity-50"
           >
             {saving ? 'Сохранение…' : 'Создать'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/* ============================================================
-   Модалка: детали урока
-   ============================================================ */
-const LessonDetailsModal = ({
-  lesson,
-  students,
-  subs,
-  getLessonLabel,
-  formatTime,
-  canStart,
-  onClose,
-  onDelete,
-  onStart,
-  onRevert,
-  onMarkDone,
-  onMarkSkipped,
-  onMarkCancelled,
-}) => {
-  const [attendance, setAttendance] = useState(() => ({ ...(lesson.attendance || {}) }));
-  const studentMap = useMemo(() => {
-    const m = {};
-    students.forEach((s) => (m[s.id] = s));
-    return m;
-  }, [students]);
-
-  const isPast = new Date(lesson.ends_at) < new Date();
-
-  const toggleAttendance = (studentId) => {
-    setAttendance((prev) => {
-      const next = { ...prev };
-      const current = next[studentId] === undefined ? true : next[studentId];
-      next[studentId] = !current;
-      return next;
-    });
-  };
-
-  const isAttended = (studentId) => {
-    if (attendance[studentId] === undefined) return true;
-    return attendance[studentId] === true;
-  };
-
-  const label = getLessonLabel(lesson);
-
-  const statusBadge = (() => {
-    if (lesson.status === 'done')
-      return { text: '✓ Проведён', cls: 'bg-blue-50 text-blue-700' };
-    if (lesson.status === 'cancelled')
-      return { text: 'Отменён', cls: 'bg-slate-100 text-slate-500' };
-    if (lesson.status === 'skipped')
-      return { text: '⊘ Не проведён', cls: 'bg-amber-50 text-amber-700' };
-    if (isPast) return { text: '! Не отмечен', cls: 'bg-red-50 text-red-700' };
-    return { text: 'Запланирован', cls: 'bg-emerald-50 text-emerald-700' };
-  })();
-
-  const canMark = lesson.status === 'scheduled';
-  const canRevert = lesson.status === 'done';
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl border border-gray-200 shadow-2xl p-6 max-h-[92vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <div className="text-lg font-bold text-gray-900">{label}</div>
-            <div className="text-xs text-gray-400 mt-0.5">
-              {new Date(lesson.starts_at).toLocaleDateString('ru-RU', {
-                weekday: 'long',
-                day: 'numeric',
-                month: 'long',
-              })}
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-700 text-xl cursor-pointer"
-          >
-            ✕
-          </button>
-        </div>
-
-        <div className="flex flex-wrap gap-2 mb-4 text-xs">
-          <span className={`px-2.5 py-1 rounded-full font-bold ${statusBadge.cls}`}>
-            {statusBadge.text}
-          </span>
-          <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-semibold">
-            {formatTime(lesson.starts_at)} – {formatTime(lesson.ends_at)}
-          </span>
-          <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-semibold">
-            {lesson.is_group ? 'Групповой' : 'Индивидуальный'}
-          </span>
-          {lesson.recurring_group_id && (
-            <span className="px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 font-semibold">
-              🔁 Постоянный
-            </span>
-          )}
-        </div>
-
-        {lesson.student_ids.length > 0 && (
-          <div className="mb-4">
-            <div className="text-xs font-bold text-gray-700 mb-2">
-              {canMark ? 'Кто пришёл (снимите галочку, если не был)' : 'Участники'}
-            </div>
-            <div className="space-y-1">
-              {lesson.student_ids.map((sid) => {
-                const s = studentMap[sid];
-                if (!s) return null;
-                const attended = isAttended(sid);
-                const balance = subs[sid] ?? 0;
-                return (
-                  <label
-                    key={sid}
-                    className={`flex items-center gap-2.5 p-2 rounded-lg text-sm ${
-                      canMark ? 'cursor-pointer' : ''
-                    } ${
-                      attended
-                        ? 'bg-emerald-50 border border-emerald-100'
-                        : 'bg-red-50 border border-red-100'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={attended}
-                      onChange={() => canMark && toggleAttendance(sid)}
-                      disabled={!canMark}
-                      className="w-4 h-4"
-                    />
-                    <span className="font-medium text-gray-800 flex-1">
-                      {s.name || s.email}
-                    </span>
-                    <span
-                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                        balance < 0
-                          ? 'bg-red-100 text-red-700'
-                          : balance === 0
-                          ? 'bg-slate-100 text-slate-500'
-                          : 'bg-emerald-100 text-emerald-700'
-                      }`}
-                      title="Осталось занятий"
-                    >
-                      {balance} ост.
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-            {canMark && (
-              <div className="mt-2 text-[11px] text-gray-500">
-                При проведении урока с каждого отмеченного спишется 1 занятие.
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="space-y-2">
-          {canRevert && (
-            <button
-              onClick={onRevert}
-              className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-700 font-bold rounded-xl text-sm cursor-pointer border border-red-200"
-            >
-              ↩️ Отменить проведение
-            </button>
-          )}
-
-          {canMark && canStart && (
-            <button
-              onClick={() => onStart?.()}
-              className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-sm cursor-pointer"
-            >
-              ▶ Начать урок
-            </button>
-          )}
-
-          {canMark && (
-            <button
-              onClick={() => onMarkDone?.(attendance)}
-              className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm cursor-pointer"
-            >
-              ✓ Провести урок (списать занятие)
-            </button>
-          )}
-
-          {canMark && (
-            <button
-              onClick={() => onMarkSkipped?.()}
-              className="w-full py-2.5 bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold rounded-xl text-sm cursor-pointer"
-            >
-              ⊘ Не проведён (не списывать)
-            </button>
-          )}
-
-          {canMark && !isPast && (
-            <button
-              onClick={onMarkCancelled}
-              className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm cursor-pointer"
-            >
-              ✕ Отменить урок
-            </button>
-          )}
-
-          <button
-            onClick={onDelete}
-            className="w-full py-2 bg-red-50 hover:bg-red-100 text-red-600 font-semibold rounded-xl text-sm cursor-pointer"
-          >
-            🗑 Удалить урок
           </button>
         </div>
       </div>
