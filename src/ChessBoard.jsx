@@ -535,12 +535,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           chessboardInstance.current.setPosition(targetNode.fen, true);
         }
 
-        saveStateInstant({
-          fen: targetNode.fen,
-          moveTree: treeRef.current,
-          currentNodeId: nodeId,
-        });
-
+        // Вызов сохранения в БД убран для плавной навигации стрелками без фризов.
+        // Синхронизируем только с учеником через броадкаст:
         channelRef.current?.send({
           type: 'broadcast',
           event: 'make_move',
@@ -554,7 +550,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         console.error('Ошибка FEN:', err);
       }
     },
-    [saveStateInstant]
+    []
   );
 
   useEffect(() => {
@@ -822,7 +818,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
       try {
         chessboardInstance.current = new Chessboard(boardRef.current, {
-          position: freshFen, // Убедились, что инициализируем с актуальным FEN из базы
+          position: freshFen,
           orientation: orientation,
           assetsUrl: '/assets/',
           style: {
@@ -835,7 +831,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           ],
         });
 
-        // Принудительно ставим позицию на доску
         chessboardInstance.current.setPosition(freshFen, false);
 
         chessboardInstance.current.enableMoveInput((event) => {
