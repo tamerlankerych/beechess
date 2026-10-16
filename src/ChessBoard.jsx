@@ -535,8 +535,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           chessboardInstance.current.setPosition(targetNode.fen, true);
         }
 
-        // Вызов сохранения в БД убран для плавной навигации стрелками без фризов.
-        // Синхронизируем только с учеником через броадкаст:
         channelRef.current?.send({
           type: 'broadcast',
           event: 'make_move',
@@ -943,97 +941,59 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
     channel
       .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'lessons',
-          filter: `id=eq.${lesson.id}`,
-        },
-        (payload) => {
-          if (!payload.new) return;
-
-          if (payload.new.can_student_move !== undefined) {
-            const val = payload.new.can_student_move;
-            setCanStudentMove(val);
-            canStudentMoveRef.current = val;
-            if (val === false) {
-              try {
-                chessboardInstance.current?.removeLegalMovesMarkers();
-                chessboardInstance.current?.setPosition(gameRef.current.fen());
-              } catch {}
+        'broadcast',
+        { event: 'make_move' },
+        ({ payload }) => {
+          if (!payload) return;
+          if (payload.from && payload.to) {
+            try {
+              const move = gameRef.current.move({
+                from: payload.from,
+                to: payload.to,
+                promotion: payload.promotion || 'q',
+              });
+              if (move) {
+                applyRemoteMove(move, payload.fen, payload.moveTree, payload.currentNodeId);
+                if (payload.timerW !== undefined) {
+                  timerWRef.current = payload.timerW;
+                  setTimerW(payload.timerW);
+                  if (whiteClockDomRef.current)
+                    whiteClockDomRef.current.textContent = formatTime(payload.timerW);
+                }
+                if (payload.timerB !== undefined) {
+                  timerBRef.current = payload.timerB;
+                  setTimerB(payload.timerB);
+                  if (blackClockDomRef.current)
+                    blackClockDomRef.current.textContent = formatTime(payload.timerB);
+                }
+                if (payload.activeColor !== undefined) {
+                  activeColorRef.current = payload.activeColor;
+                  setActiveColor(payload.activeColor);
+                }
+              }
+            } catch {
+              if (payload.fen) {
+                gameRef.current.load(payload.fen, { skipValidation: true });
+                if (chessboardInstance.current)
+                  chessboardInstance.current.setPosition(payload.fen, true);
+              }
             }
-          }
-
-          if (payload.new.fen && payload.new.fen !== gameRef.current.fen()) {
-            const newFen = payload.new.fen;
-            gameRef.current.load(newFen, { skipValidation: true });
-            if (chessboardInstance.current) {
-              chessboardInstance.current.setPosition(newFen, true);
-            }
-
-            if (payload.new.move_tree?.root) {
-              const syncedCurrentId = payload.new.move_tree[payload.new.current_node_id]
-                ? payload.new.current_node_id
+          } else if (payload.fen) {
+            gameRef.current.load(payload.fen, { skipValidation: true });
+            if (chessboardInstance.current)
+              chessboardInstance.current.setPosition(payload.fen, true);
+            if (payload.moveTree?.root) {
+              const syncedCurrentId = payload.moveTree[payload.currentNodeId]
+                ? payload.currentNodeId
                 : 'root';
-              treeRef.current = payload.new.move_tree;
+              treeRef.current = payload.moveTree;
               currentIdRef.current = syncedCurrentId;
-              setTree(payload.new.move_tree);
+              setTree(payload.moveTree);
               setCurrentId(syncedCurrentId);
             }
           }
         }
       )
-      .on('broadcast', { event: 'make_move' }, ({ payload }) => {
-        if (!payload) return;
-        if (payload.from && payload.to) {
-          try {
-            const move = gameRef.current.move({
-              from: payload.from,
-              to: payload.to,
-              promotion: payload.promotion || 'q',
-            });
-            if (move) {
-              applyRemoteMove(move, payload.fen, payload.moveTree, payload.currentNodeId);
-              if (payload.timerW !== undefined) {
-                timerWRef.current = payload.timerW;
-                setTimerW(payload.timerW);
-                if (whiteClockDomRef.current)
-                  whiteClockDomRef.current.textContent = formatTime(payload.timerW);
-              }
-              if (payload.timerB !== undefined) {
-                timerBRef.current = payload.timerB;
-                setTimerB(payload.timerB);
-                if (blackClockDomRef.current)
-                  blackClockDomRef.current.textContent = formatTime(payload.timerB);
-              }
-              if (payload.activeColor !== undefined) {
-                activeColorRef.current = payload.activeColor;
-                setActiveColor(payload.activeColor);
-              }
-            }
-          } catch {
-            if (payload.fen) {
-              gameRef.current.load(payload.fen, { skipValidation: true });
-              if (chessboardInstance.current)
-                chessboardInstance.current.setPosition(payload.fen, true);
-            }
-          }
-        } else if (payload.fen) {
-          gameRef.current.load(payload.fen, { skipValidation: true });
-          if (chessboardInstance.current)
-            chessboardInstance.current.setPosition(payload.fen, true);
-          if (payload.moveTree?.root) {
-            const syncedCurrentId = payload.moveTree[payload.currentNodeId]
-              ? payload.currentNodeId
-              : 'root';
-            treeRef.current = payload.moveTree;
-            currentIdRef.current = syncedCurrentId;
-            setTree(payload.moveTree);
-            setCurrentId(syncedCurrentId);
-          }
-        }
-      })
       .on('broadcast', { event: 'clock_state' }, ({ payload }) => {
         if (!payload) return;
         if (payload.timerW !== undefined) {
