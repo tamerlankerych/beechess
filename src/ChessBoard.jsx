@@ -40,9 +40,17 @@ const PIECES_PALETTE = [
   { piece: 'bP', name: 'Чёрная пешка', fenChar: 'p' },
 ];
 
+let sharedAudioCtx = null;
+const getAudioCtx = () => {
+  if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
+    sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return sharedAudioCtx;
+};
+
 const playSound = (type) => {
   try {
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const audioCtx = getAudioCtx();
     if (audioCtx.state === 'suspended') audioCtx.resume();
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
@@ -58,6 +66,28 @@ const playSound = (type) => {
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
       osc.start(now);
       osc.stop(now + 0.1);
+    } else if (type === 'tick' || type === 'go' || type === 'lowtime') {
+      // 'tick' — секунда отсчёта, 'go' — старт тура, 'lowtime' — двойной сигнал «мало времени»
+      const freq = type === 'go' ? 1320 : type === 'lowtime' ? 988 : 660;
+      const dur = type === 'go' ? 0.5 : 0.12;
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+      osc.start(now);
+      osc.stop(now + dur);
+      if (type === 'lowtime') {
+        const osc2 = audioCtx.createOscillator();
+        const gain2 = audioCtx.createGain();
+        osc2.connect(gain2);
+        gain2.connect(audioCtx.destination);
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(freq, now + 0.2);
+        gain2.gain.setValueAtTime(0.3, now + 0.2);
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+        osc2.start(now + 0.2);
+        osc2.stop(now + 0.32);
+      }
     } else {
       osc.type = 'sine';
       osc.frequency.setValueAtTime(550, now);
@@ -68,7 +98,7 @@ const playSound = (type) => {
       osc.stop(now + 0.05);
     }
   } catch {
-    // Звук не обязателен
+    // Звук
   }
 };
 
@@ -132,6 +162,77 @@ const buildFullFen = (boardFen, turn, castling) => {
   return `${boardPart} ${activeColor} ${castlingPart} - 0 1`;
 };
 
+const expandFenRows = (fen) =>
+  fen
+    .split(' ')[0]
+    .split('/')
+    .map((row) => {
+      const cells = [];
+      for (const ch of row) {
+        if (/\d/.test(ch)) for (let i = 0; i < parseInt(ch, 10); i++) cells.push(null);
+        else cells.push(ch);
+      }
+      while (cells.length < 8) cells.push(null);
+      return cells;
+    });
+
+// chess.js (при skipValidation) верит праву рокировки на слово: если в FEN стоит KQkq,
+// а король не на e1/e8 (например, в углу), генерация ходов ломается и фигуры «не ходят».
+// Оставляем только те права, которые реально возможны на этой доске.
+const sanitizeCastlingInFen = (fen) => {
+  const parts = fen.split(' ');
+  const rows = expandFenRows(fen);
+  const at = (file, rank) => rows[8 - rank]?.[file] ?? null;
+  const rights = parts[2] && parts[2] !== '-' ? parts[2] : '';
+  const keep = [];
+  if (at(4, 1) === 'K') {
+    if (rights.includes('K') && at(7, 1) === 'R') keep.push('K');
+    if (rights.includes('Q') && at(0, 1) === 'R') keep.push('Q');
+  }
+  if (at(4, 8) === 'k') {
+    if (rights.includes('k') && at(7, 8) === 'r') keep.push('k');
+    if (rights.includes('q') && at(0, 8) === 'r') keep.push('q');
+  }
+  parts[2] = keep.length ? keep.join('') : '-';
+  return parts.join(' ');
+};
+
+// Возвращает текст проблемы или null, если позицию можно играть
+const validateEditorPosition = (fen) => {
+  const rows = expandFenRows(fen);
+  const flat = rows.flat();
+  if (flat.filter((c) => c === 'K').length !== 1) return 'На доске должен быть ровно один белый король.';
+  if (flat.filter((c) => c === 'k').length !== 1) return 'На доске должен быть ровно один чёрный король.';
+  if (rows[0].some((c) => c === 'P' || c === 'p') || rows[7].some((c) => c === 'P' || c === 'p')) {
+    return 'Пешки не могут стоять на первой и восьмой горизонталях.';
+  }
+  try {
+    // Если король стороны, которая НЕ ходит, под шахом — позиция невозможна
+    const parts = fen.split(' ');
+    parts[1] = parts[1] === 'w' ? 'b' : 'w';
+    parts[2] = '-';
+    const probe = new Chess();
+    probe.load(parts.join(' '), { skipValidation: true });
+    if (probe.isCheck()) return 'Король стороны, которая не ходит, стоит под шахом — такая позиция невозможна.';
+  } catch {
+    // не удалось проверить — не блокируем сохранение
+  }
+  return null;
+};
+
+// В редакторе: null = режим перемещения (клик ничего не меняет), EDITOR_ERASER = ластик
+const EDITOR_ERASER = '__eraser__';
+
+const LOW_TIME_MS = 10000;
+const COUNTDOWN_SECONDS = 5;
+
+// Рисует время и краснеет при малом остатке
+const setClockText = (el, ms) => {
+  if (!el) return;
+  el.textContent = formatTime(ms);
+  el.style.color = ms <= LOW_TIME_MS ? '#ef4444' : '';
+};
+
 const formatTime = (ms) => {
   if (ms < 0) ms = 0;
   const totalSec = Math.floor(ms / 1000);
@@ -142,6 +243,536 @@ const formatTime = (ms) => {
     return `${sec}.${tenths}`;
   }
   return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+};
+
+/* ============================================================
+   Круговой турнир: константы и чистые функции
+   ============================================================ */
+const ROUND_PAUSE_MS = 4000;
+
+const TIME_CONTROLS = [
+  { min: 3, inc: 2 },
+  { min: 5, inc: 3 },
+  { min: 10, inc: 5 },
+];
+
+const RESULT_REASON_LABELS = {
+  checkmate: 'мат',
+  stalemate: 'пат',
+  insufficient: 'недостаточно материала',
+  repetition: 'троекратное повторение',
+  fifty: 'правило 50 ходов',
+  draw: 'ничья',
+  timeout: 'просрочка времени',
+  resign: 'сдача',
+};
+
+const formatPoints = (pts) => {
+  const v = Number(pts) || 0;
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+};
+
+const formatGameResult = (res) => {
+  if (!res) return '';
+  const score = res.result === '1-0' ? '1–0' : res.result === '0-1' ? '0–1' : '½–½';
+  const reason = RESULT_REASON_LABELS[res.reason];
+  return reason ? `${score} · ${reason}` : score;
+};
+
+const describeMyResult = (res, myColor) => {
+  if (!res || res.result === '1/2-1/2') return 'Ничья';
+  const whiteWon = res.result === '1-0';
+  return (whiteWon && myColor === 'w') || (!whiteWon && myColor === 'b') ? 'Победа' : 'Поражение';
+};
+
+/**
+ * Полная сетка круговой системы (метод «круга») на все туры вперёд.
+ * Цвета: игрок на первой доске чередует цвет каждый тур, на остальных досках
+ * цвет определяется чётностью номера доски. Для чётного N это даёт разницу
+ * белых/чёрных не больше 1 и не более одного «слома» чередования на игрока.
+ * При нечётном N в каждом туре один игрок пропускает тур (bye).
+ */
+const generateRoundRobinSchedule = (participants) => {
+  const list = participants.map((p) => ({ id: p.id, name: p.name }));
+  if (list.length % 2 !== 0) list.push(null);
+  const n = list.length;
+  let arr = [...list];
+  const rounds = [];
+
+  for (let r = 0; r < n - 1; r++) {
+    const pairings = [];
+    let bye = null;
+    let table = 1;
+    for (let i = 0; i < n / 2; i++) {
+      const x = arr[i];
+      const y = arr[n - 1 - i];
+      if (!x || !y) {
+        bye = x || y;
+        continue;
+      }
+      const xWhite = i === 0 ? r % 2 === 0 : i % 2 === 0;
+      pairings.push({
+        table: table++,
+        white: xWhite ? x : y,
+        black: xWhite ? y : x,
+      });
+    }
+    rounds.push({ round: r + 1, pairings, bye });
+    arr = [arr[0], arr[n - 1], ...arr.slice(1, n - 1)];
+  }
+  return rounds;
+};
+
+const computeStandings = (tournament) => {
+  if (!tournament) return [];
+  const rows = {};
+  const games = [];
+  tournament.participants.forEach((p) => {
+    rows[p.id] = { id: p.id, name: p.name, points: 0, sb: 0, wins: 0, draws: 0, losses: 0, played: 0 };
+  });
+  tournament.schedule.forEach((roundInfo) => {
+    roundInfo.pairings.forEach((pair) => {
+      const res = tournament.results?.[`${roundInfo.round}:${pair.table}`];
+      if (!res) return;
+      const w = rows[pair.white.id];
+      const b = rows[pair.black.id];
+      if (!w || !b) return;
+      games.push({ w, b, result: res.result });
+      w.played += 1;
+      b.played += 1;
+      if (res.result === '1-0') {
+        w.points += 1;
+        w.wins += 1;
+        b.losses += 1;
+      } else if (res.result === '0-1') {
+        b.points += 1;
+        b.wins += 1;
+        w.losses += 1;
+      } else {
+        w.points += 0.5;
+        b.points += 0.5;
+        w.draws += 1;
+        b.draws += 1;
+      }
+    });
+  });
+  // Зоннеборн-Бергер: очки побеждённых соперников + половина очков тех, с кем ничья
+  games.forEach(({ w, b, result }) => {
+    if (result === '1-0') w.sb += b.points;
+    else if (result === '0-1') b.sb += w.points;
+    else {
+      w.sb += b.points / 2;
+      b.sb += w.points / 2;
+    }
+  });
+  return Object.values(rows).sort(
+    (a, b) =>
+      b.points - a.points ||
+      b.sb - a.sb ||
+      b.wins - a.wins ||
+      a.name.localeCompare(b.name, 'ru')
+  );
+};
+
+/** Воспроизводит партию по списку SAN-ходов и строит линейное дерево ходов. */
+const replayMoves = (moves = []) => {
+  const game = new Chess();
+  const tree = {
+    root: { id: 'root', fen: game.fen(), san: '', parentId: null, children: [], color: 'w' },
+  };
+  let parentId = 'root';
+  for (const san of moves) {
+    let move = null;
+    try {
+      move = game.move(san);
+    } catch {
+      move = null;
+    }
+    if (!move) break;
+    const id = `m${Object.keys(tree).length}`;
+    tree[id] = { id, fen: game.fen(), san: move.san, color: move.color, parentId, children: [] };
+    tree[parentId] = { ...tree[parentId], children: [id] };
+    parentId = id;
+  }
+  return { game, tree, currentId: parentId };
+};
+
+/** Может ли сторона теоретически поставить мат (для правила просрочки времени). */
+const hasMatingMaterial = (game, color) => {
+  const pieces = game
+    .board()
+    .flat()
+    .filter((sq) => sq && sq.color === color && sq.type !== 'k');
+  if (pieces.length === 0) return false;
+  if (pieces.some((p) => p.type === 'p' || p.type === 'r' || p.type === 'q')) return true;
+  return pieces.length >= 2;
+};
+
+const detectGameOver = (game) => {
+  if (game.isCheckmate()) {
+    return { result: game.turn() === 'w' ? '0-1' : '1-0', reason: 'checkmate' };
+  }
+  if (game.isStalemate()) return { result: '1/2-1/2', reason: 'stalemate' };
+  if (game.isInsufficientMaterial()) return { result: '1/2-1/2', reason: 'insufficient' };
+  if (game.isThreefoldRepetition()) return { result: '1/2-1/2', reason: 'repetition' };
+  if (game.isDraw()) return { result: '1/2-1/2', reason: 'fifty' };
+  return null;
+};
+
+/* ============================================================
+   Панель кругового турнира (только отображение; логика — в комнате)
+   ============================================================ */
+const TournamentPanel = ({
+  isTeacher,
+  isObserver,
+  tournament,
+  standings,
+  settings,
+  onSettingsChange,
+  participantCount,
+  lobbyPlayers,
+  lobbyJoined,
+  onToggleJoin,
+  currentUserId,
+  gameCtx,
+  onStart,
+  onAbort,
+  onNewTournament,
+  onResign,
+  onWatchTable,
+  onPause,
+  onResume,
+  countdownActive,
+}) => {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!tournament?.nextRoundAt) return undefined;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(timer);
+  }, [tournament?.nextRoundAt]);
+
+  const status = tournament?.status || 'idle';
+  const isRunning = status === 'running';
+  const isFinished = status === 'finished';
+  const roundInfo = isRunning ? tournament.schedule[tournament.round - 1] : null;
+  const secondsLeft =
+    isRunning && tournament.nextRoundAt
+      ? Math.max(0, Math.ceil((Date.parse(tournament.nextRoundAt) - now) / 1000))
+      : null;
+  const isPlayer = !!gameCtx?.myColor;
+  const playing = isPlayer && !gameCtx.finished && isRunning && !tournament.paused;
+  const timeLabel = tournament
+    ? `${tournament.settings.timeControl.min}+${tournament.settings.timeControl.inc}`
+    : '';
+  const medals = ['🥇', '🥈', '🥉'];
+
+  return (
+    <div className="bg-white p-3 rounded-2xl border border-gray-200 shadow-sm font-sans select-none">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-bold text-gray-900 text-sm flex items-center gap-1.5">
+          <span>🏆</span> Круговой турнир
+        </h3>
+        <span
+          className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+            isRunning
+              ? 'bg-emerald-100 text-emerald-800'
+              : isFinished
+              ? 'bg-amber-100 text-amber-800'
+              : 'bg-slate-100 text-slate-600'
+          }`}
+        >
+          {isRunning
+            ? `Тур ${tournament.round} из ${tournament.totalRounds}`
+            : isFinished
+            ? 'Завершён'
+            : 'Ожидание'}
+        </span>
+      </div>
+
+      {!tournament && isTeacher && !isObserver && (
+        <div className="mb-3 p-3 bg-blue-50/80 border border-blue-100 rounded-xl space-y-2.5">
+          <div className="text-xs font-bold text-blue-900">Настройки турнира:</div>
+
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-gray-700 font-medium">Участвовать тренеру:</span>
+            <input
+              type="checkbox"
+              checked={settings.includeTeacher}
+              onChange={(e) => onSettingsChange({ ...settings, includeTeacher: e.target.checked })}
+              className="w-4 h-4 accent-blue-600 cursor-pointer"
+            />
+          </div>
+
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-gray-700 font-medium">Контроль времени:</span>
+            <select
+              value={`${settings.timeControl.min}+${settings.timeControl.inc}`}
+              onChange={(e) => {
+                const [min, inc] = e.target.value.split('+').map(Number);
+                onSettingsChange({ ...settings, timeControl: { min, inc } });
+              }}
+              className="border border-blue-200 bg-white rounded px-2 py-1 text-xs font-bold cursor-pointer"
+            >
+              {TIME_CONTROLS.map((tc) => (
+                <option key={`${tc.min}+${tc.inc}`} value={`${tc.min}+${tc.inc}`}>
+                  {tc.min} мин + {tc.inc} сек
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {lobbyPlayers.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {lobbyPlayers.map((p) => (
+                <span
+                  key={p.id}
+                  className="text-[11px] font-semibold bg-white border border-blue-200 text-blue-900 rounded-full px-2 py-0.5"
+                >
+                  ✋ {p.name}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className="text-[11px] text-blue-700 bg-white/70 rounded-lg px-2 py-1.5">
+              Пока никто не записался. Ученики сами нажимают «Участвовать» в этой панели.
+            </div>
+          )}
+
+          <div className="text-[11px] text-blue-800">
+            Игроков: <strong>{participantCount}</strong>
+            {participantCount >= 2 && participantCount % 2 === 1 && (
+              <span className="text-amber-700">
+                {' '}
+                · нечётное число: в каждом туре один игрок отдыхает
+              </span>
+            )}
+            {participantCount < 2 && <span className="text-red-600"> · нужно минимум 2</span>}
+          </div>
+
+          <button
+            onClick={onStart}
+            disabled={participantCount < 2}
+            className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold shadow-sm transition cursor-pointer"
+          >
+            🚀 Запустить турнир
+          </button>
+          <div className="text-[10px] text-blue-700 leading-snug">
+            Нажмите один раз — туры, цвета, часы и переходы между турами пойдут автоматически.
+          </div>
+        </div>
+      )}
+
+      {!tournament && !isTeacher && (
+        <div className="mb-1 p-3 bg-blue-50/80 border border-blue-100 rounded-xl space-y-2">
+          {isObserver ? (
+            <div className="text-xs text-gray-500 text-center">
+              Турнир ещё не запущен. Вы наблюдатель.
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={onToggleJoin}
+                className={`w-full py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  lobbyJoined
+                    ? 'bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm'
+                }`}
+              >
+                {lobbyJoined ? '✓ Вы записаны (нажмите, чтобы выйти)' : '✋ Участвовать в турнире'}
+              </button>
+              <div className="text-[11px] text-blue-800 text-center">
+                Записались: <strong>{lobbyPlayers.length}</strong>
+                {lobbyPlayers.length > 0 && ` — ${lobbyPlayers.map((p) => p.name).join(', ')}`}
+              </div>
+              <div className="text-[10px] text-gray-500 text-center">
+                Тренер запустит турнир, дальше всё пойдёт автоматически.
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {isRunning && tournament.paused && (
+        <div className="mb-3 p-2 bg-amber-100 border border-amber-300 rounded-xl text-center text-xs font-bold text-amber-900">
+          ⏸ Турнир на паузе — часы остановлены
+        </div>
+      )}
+
+      {isRunning && isTeacher && !isObserver && (
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          {tournament.paused ? (
+            <button
+              onClick={onResume}
+              className="py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+            >
+              ▶ Продолжить
+            </button>
+          ) : (
+            <button
+              onClick={onPause}
+              disabled={countdownActive || !!tournament.nextRoundAt}
+              title="Пауза доступна, пока идут партии"
+              className="py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-xs font-bold transition cursor-pointer"
+            >
+              ⏸ Пауза
+            </button>
+          )}
+          <button
+            onClick={onAbort}
+            className="py-1.5 bg-red-50 border border-red-100 text-red-600 hover:bg-red-100 rounded-xl text-xs font-bold transition cursor-pointer"
+          >
+            Завершить
+          </button>
+        </div>
+      )}
+
+      {isRunning && (
+        <div className="mb-3 p-2.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-1.5">
+          <div className="flex items-center justify-between text-[11px] font-bold text-amber-900">
+            <span>Тур {tournament.round}</span>
+            <span className="font-semibold text-amber-700">Контроль {timeLabel}</span>
+          </div>
+
+          {roundInfo.pairings.map((pair) => {
+            const res = tournament.results?.[`${tournament.round}:${pair.table}`];
+            const isMine = pair.white.id === currentUserId || pair.black.id === currentUserId;
+            const watched = !isPlayer && gameCtx?.table === pair.table;
+            const clickable = !isPlayer && !isMine;
+            return (
+              <div
+                key={pair.table}
+                onClick={clickable ? () => onWatchTable(pair.table) : undefined}
+                title={clickable ? 'Смотреть эту партию' : undefined}
+                className={`text-xs rounded-lg border px-2 py-1.5 transition ${
+                  isMine
+                    ? 'bg-emerald-50 border-emerald-300'
+                    : watched
+                    ? 'bg-blue-50 border-blue-300'
+                    : 'bg-white border-amber-100'
+                } ${clickable ? 'cursor-pointer hover:border-blue-300' : ''}`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500 font-semibold">
+                    Стол {pair.table}
+                    {isMine && ' · ваша партия'}
+                    {watched && ' · вы смотрите'}
+                  </span>
+                  <span
+                    className={`text-[10px] font-black px-1.5 py-0.5 rounded ${
+                      res ? 'bg-slate-800 text-white' : 'bg-emerald-100 text-emerald-700'
+                    }`}
+                  >
+                    {res ? formatGameResult(res) : '● идёт'}
+                  </span>
+                </div>
+                <div className="mt-0.5 flex items-center justify-between gap-1">
+                  <span className="font-bold text-gray-800 truncate max-w-[45%]" title={pair.white.name}>
+                    ⬜ {pair.white.name}
+                  </span>
+                  <span className="text-gray-400">vs</span>
+                  <span className="font-bold text-gray-800 truncate max-w-[45%]" title={pair.black.name}>
+                    ⬛ {pair.black.name}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+
+          {roundInfo.bye && (
+            <div className="text-[11px] text-gray-600 px-1">
+              😴 Пропускает тур: <strong>{roundInfo.bye.name}</strong>
+            </div>
+          )}
+
+          {secondsLeft !== null && (
+            <div className="text-[11px] font-bold text-emerald-700 text-center pt-1">
+              Все партии тура завершены. Следующий тур через {secondsLeft} с…
+            </div>
+          )}
+        </div>
+      )}
+
+      {playing && (
+        <button
+          onClick={() => {
+            if (window.confirm('Сдать партию?')) onResign();
+          }}
+          className="w-full mb-3 py-1.5 bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded-xl text-xs font-bold transition cursor-pointer"
+        >
+          🏳 Сдаться
+        </button>
+      )}
+
+      {isFinished && standings.length > 0 && (
+        <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-center">
+          <div className="text-xs font-bold text-amber-900">🏁 Турнир завершён</div>
+          <div className="text-sm font-black text-amber-800 mt-0.5">
+            Победитель: {standings[0].name}
+          </div>
+        </div>
+      )}
+
+      {isFinished && isTeacher && !isObserver && (
+        <button
+          onClick={onNewTournament}
+          className="w-full mb-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+        >
+          ➕ Новый турнир
+        </button>
+      )}
+
+      {tournament && (
+        <div className="space-y-1.5">
+          <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide px-1">
+            {isFinished ? 'Итоговая таблица' : 'Таблица очков'}
+          </div>
+          {standings.map((p, idx) => {
+            const isMe = p.id === currentUserId;
+            return (
+              <div
+                key={p.id}
+                className={`flex items-center justify-between px-3 py-2 rounded-xl border transition ${
+                  isMe
+                    ? 'bg-amber-100/80 border-amber-300 ring-1 ring-amber-400 font-bold'
+                    : 'bg-slate-50 border-slate-100 text-gray-700'
+                }`}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-xs font-bold text-gray-400 w-5">
+                    {isFinished && idx < 3 ? medals[idx] : `${idx + 1}.`}
+                  </span>
+                  <span className="text-xs truncate" title={p.name}>
+                    {p.name} {isMe && '(Вы)'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[10px] text-gray-400" title="Победы / ничьи / поражения">
+                    {p.wins}/{p.draws}/{p.losses}
+                  </span>
+                  <span
+                    className="text-[10px] text-gray-400"
+                    title="Коэффициент Зоннеборна-Бергера: очки побеждённых соперников + половина очков тех, с кем сыграна ничья"
+                  >
+                    СБ {formatPoints(p.sb)}
+                  </span>
+                  <span className="text-xs font-black bg-white px-2 py-0.5 rounded border border-gray-200">
+                    {formatPoints(p.points)} очк.
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+          {isFinished && (
+            <div className="text-[10px] text-gray-400 px-1">
+              При равенстве очков место определяет коэффициент Зоннеборна-Бергера (СБ).
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 };
 
 export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson }) => {
@@ -176,6 +807,31 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   const [clockStarted, setClockStarted] = useState(false);
   const [incrementMs, setIncrementMs] = useState(5000);
 
+  // --- Турнир ---
+  const [currentUser, setCurrentUser] = useState(null);
+  const [tournament, setTournament] = useState(null);
+  const [gameCtx, setGameCtx] = useState(null);
+  const [tournamentSettings, setTournamentSettings] = useState({
+    includeTeacher: false,
+    timeControl: { min: 3, inc: 2 },
+  });
+  const [lobbyPlayers, setLobbyPlayers] = useState([]);
+  const [lobbyJoined, setLobbyJoined] = useState(false);
+  const lobbyJoinedRef = useRef(false);
+
+  const tournamentRef = useRef(null);
+  const gameCtxRef = useRef(null);
+  const currentUserRef = useRef(null);
+  const nextRoundTimerRef = useRef(null);
+  const lastTickRef = useRef(Date.now());
+  const tournamentApiRef = useRef({});
+  const restoreTournamentRef = useRef(null);
+  const clockExpiredRef = useRef(null);
+  const [countdown, setCountdown] = useState(null);
+  const countdownTimerRef = useRef(null);
+  const countdownActiveRef = useRef(false);
+  const lowTimeWarnedRef = useRef({ w: false, b: false });
+
   const timerWRef = useRef(timerW);
   const timerBRef = useRef(timerB);
   const whiteClockDomRef = useRef(null);
@@ -188,28 +844,85 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   const incrementMsRef = useRef(incrementMs);
   const canStudentMoveRef = useRef(canStudentMove);
   const isEditorModeRef = useRef(isEditorMode);
+  const orientationRef = useRef(COLOR.white);
+  const lastPointerRef = useRef({ x: null, y: null });
+  const editorDownRef = useRef(null);
   const tempEditorFenRef = useRef(tempEditorFen);
   const selectedEditorPieceRef = useRef(selectedEditorPiece);
   const editorTurnRef = useRef(editorTurn);
   const editorCastlingRef = useRef(editorCastling);
 
+  const paintClocks = useCallback(() => {
+    setClockText(whiteClockDomRef.current, timerWRef.current);
+    setClockText(blackClockDomRef.current, timerBRef.current);
+  }, []);
+
+  const setWhiteClockEl = useCallback((el) => {
+    whiteClockDomRef.current = el;
+    setClockText(el, timerWRef.current);
+  }, []);
+
+  const setBlackClockEl = useCallback((el) => {
+    blackClockDomRef.current = el;
+    setClockText(el, timerBRef.current);
+  }, []);
+
+  const ensureCurrentUser = useCallback(async () => {
+    if (currentUserRef.current) return currentUserRef.current;
+    try {
+      const { data } = await supabase.auth.getUser();
+      const id = data?.user?.id;
+      if (!id) return null;
+      let name = data.user.email || 'Игрок';
+      try {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('name, email')
+          .eq('id', id)
+          .maybeSingle();
+        if (profile) name = profile.name || profile.email || name;
+      } catch {
+        // имя профиля необязательно
+      }
+      const user = { id, name };
+      currentUserRef.current = user;
+      setCurrentUser(user);
+      return user;
+    } catch (e) {
+      console.error('Не удалось получить пользователя:', e);
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    ensureCurrentUser();
+  }, [ensureCurrentUser]);
+
+  // Участники = ученики, нажавшие «Участвовать» (Presence), + тренер по переключателю
+  const lessonParticipants = useMemo(() => {
+    const list = [...lobbyPlayers];
+    if (tournamentSettings.includeTeacher && currentUser?.id) {
+      list.unshift({ id: currentUser.id, name: currentUser.name });
+    }
+    const seen = new Set();
+    return list.filter((p) => p.id && !seen.has(p.id) && seen.add(p.id));
+  }, [lobbyPlayers, tournamentSettings.includeTeacher, currentUser]);
+
   useEffect(() => {
     currentIdRef.current = currentId;
     treeRef.current = tree;
-    timerWRef.current = timerW;
-    timerBRef.current = timerB;
     activeColorRef.current = activeColor;
     clockStartedRef.current = clockStarted;
     incrementMsRef.current = incrementMs;
     canStudentMoveRef.current = canStudentMove;
     isEditorModeRef.current = isEditorMode;
+    orientationRef.current = orientation;
     tempEditorFenRef.current = tempEditorFen;
     selectedEditorPieceRef.current = selectedEditorPiece;
     editorTurnRef.current = editorTurn;
     editorCastlingRef.current = editorCastling;
 
-    if (whiteClockDomRef.current) whiteClockDomRef.current.textContent = formatTime(timerW);
-    if (blackClockDomRef.current) blackClockDomRef.current.textContent = formatTime(timerB);
+    paintClocks();
   }, [
     currentId,
     tree,
@@ -224,6 +937,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     selectedEditorPiece,
     editorTurn,
     editorCastling,
+    orientation,
+    paintClocks,
   ]);
 
   const saveStateInstant = useCallback(
@@ -301,6 +1016,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   );
 
   const toggleStudentAccess = async () => {
+    if (tournamentRef.current?.status === 'running') return;
     const nextState = !canStudentMove;
     setCanStudentMove(nextState);
     canStudentMoveRef.current = nextState;
@@ -321,60 +1037,48 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     });
   };
 
-  useEffect(() => {
-    if (!clockStarted) return;
+  // Часы считаются по реальному времени (Date.now), а не по числу тиков, поэтому
+  // не «уплывают» при троттлинге таймеров в фоновой вкладке. Сеть не используется.
+  const tickClock = useCallback(() => {
+    const now = Date.now();
+    const delta = Math.max(0, now - lastTickRef.current);
+    lastTickRef.current = now;
+    if (!clockStartedRef.current) return;
 
-    const tickInterval = setInterval(() => {
-      if (activeColorRef.current === 'w') {
-        timerWRef.current = Math.max(0, timerWRef.current - 100);
-        if (whiteClockDomRef.current) {
-          whiteClockDomRef.current.textContent = formatTime(timerWRef.current);
-        }
-        if (timerWRef.current <= 0) {
-          clockStartedRef.current = false;
-          setClockStarted(false);
-          setTimerW(0);
-          if (isTeacher) {
-            saveState(gameRef.current.fen(), canStudentMoveRef.current);
-            channelRef.current?.send({
-              type: 'broadcast',
-              event: 'clock_state',
-              payload: {
-                timerW: 0,
-                timerB: timerBRef.current,
-                incrementMs: incrementMsRef.current,
-                activeColor: activeColorRef.current,
-                clockStarted: false,
-              },
-            });
-          }
-        }
-      } else {
-        timerBRef.current = Math.max(0, timerBRef.current - 100);
-        if (blackClockDomRef.current) {
-          blackClockDomRef.current.textContent = formatTime(timerBRef.current);
-        }
-        if (timerBRef.current <= 0) {
-          clockStartedRef.current = false;
-          setClockStarted(false);
-          setTimerB(0);
-          if (isTeacher) {
-            saveState(gameRef.current.fen(), canStudentMoveRef.current);
-            channelRef.current?.send({
-              type: 'broadcast',
-              event: 'clock_state',
-              payload: {
-                timerW: timerWRef.current,
-                timerB: 0,
-                incrementMs: incrementMsRef.current,
-                activeColor: activeColorRef.current,
-                clockStarted: false,
-              },
-            });
-          }
-        }
+    // Сигнал при 10 секундах: один раз на сторону, в турнире — только тому, чьи это часы
+    const checkLowTime = (c, remaining) => {
+      if (remaining > LOW_TIME_MS) {
+        lowTimeWarnedRef.current[c] = false;
+        return;
       }
-    }, 100);
+      if (lowTimeWarnedRef.current[c] || remaining <= 0) return;
+      lowTimeWarnedRef.current[c] = true;
+      if (tournamentRef.current?.status === 'running') {
+        if (gameCtxRef.current?.myColor === c) playSound('lowtime');
+      } else {
+        playSound('lowtime');
+      }
+    };
+
+    const color = activeColorRef.current;
+    if (color === 'w') {
+      timerWRef.current = Math.max(0, timerWRef.current - delta);
+      setClockText(whiteClockDomRef.current, timerWRef.current);
+      checkLowTime('w', timerWRef.current);
+      if (timerWRef.current <= 0) clockExpiredRef.current?.('w');
+    } else {
+      timerBRef.current = Math.max(0, timerBRef.current - delta);
+      setClockText(blackClockDomRef.current, timerBRef.current);
+      checkLowTime('b', timerBRef.current);
+      if (timerBRef.current <= 0) clockExpiredRef.current?.('b');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!clockStarted) return undefined;
+
+    lastTickRef.current = Date.now();
+    const tickInterval = setInterval(tickClock, 100);
 
     const syncInterval = setInterval(() => {
       setTimerW(timerWRef.current);
@@ -385,9 +1089,10 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       clearInterval(tickInterval);
       clearInterval(syncInterval);
     };
-  }, [clockStarted, isTeacher, saveState]);
+  }, [clockStarted, tickClock]);
 
   const setTimeControl = (minutes, incSeconds) => {
+    if (tournamentRef.current?.status === 'running') return;
     const totalMs = minutes * 60 * 1000;
     const incMs = incSeconds * 1000;
     timerWRef.current = totalMs;
@@ -423,6 +1128,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   };
 
   const toggleClockStart = () => {
+    if (tournamentRef.current?.status === 'running') return;
     const nextState = !clockStarted;
     clockStartedRef.current = nextState;
     setClockStarted(nextState);
@@ -444,6 +1150,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   const toggleBoardOrientation = () => {
     const nextOrientation = orientation === COLOR.white ? COLOR.black : COLOR.white;
     setOrientation(nextOrientation);
+    if (tournamentRef.current?.status === 'running') return; // в турнире доска переворачивается только локально
 
     channelRef.current?.send({
       type: 'broadcast',
@@ -453,10 +1160,10 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   };
 
   const openMaterialPosition = async (material) => {
-    if (!isTeacher || !material?.setup_fen) return;
+    if (!isTeacher || !material?.setup_fen || tournamentRef.current?.status === 'running') return;
 
     try {
-      const preparedGame = new Chess(material.setup_fen, { skipValidation: true });
+      const preparedGame = new Chess(sanitizeCastlingInFen(material.setup_fen), { skipValidation: true });
       const preparedFen = preparedGame.fen();
       const nextTree = {
         root: {
@@ -518,15 +1225,15 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       });
       channelRef.current?.send({ type: 'broadcast', event: 'clear_drawings', payload: {} });
     } catch (error) {
-      console.error('Не удалось открыть учебную позицию:', error);
-      window.alert('Позиция повреждена и не может быть открыта.');
+      console.error('Не удалось открыть позицию:', error);
+      window.alert('Позиция повреждена.');
     }
   };
 
   const jumpToNode = useCallback(
     (nodeId) => {
       const targetNode = treeRef.current[nodeId];
-      if (!targetNode) return;
+      if (!targetNode || tournamentRef.current?.status === 'running') return;
       currentIdRef.current = nodeId;
       setCurrentId(nodeId);
       try {
@@ -641,8 +1348,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       setTimerB(nextB);
       setActiveColor(nextColor);
 
-      if (whiteClockDomRef.current) whiteClockDomRef.current.textContent = formatTime(nextW);
-      if (blackClockDomRef.current) blackClockDomRef.current.textContent = formatTime(nextB);
+      paintClocks();
 
       if (chessboardInstance.current) {
         chessboardInstance.current.removeMarkers();
@@ -651,11 +1357,14 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
       return { moveTree: nextTree, currentNodeId: nextCurrentId };
     },
-    []
+    [paintClocks]
   );
 
   const executeMove = useCallback(
     (from, to, promotion = 'q') => {
+      if (tournamentRef.current?.status === 'running') {
+        return tournamentApiRef.current.playMove?.(from, to, promotion) ?? false;
+      }
       try {
         const move = gameRef.current.move({ from, to, promotion });
         if (!move) return false;
@@ -703,6 +1412,886 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     const { from, to } = pendingPromotion;
     setPendingPromotion(null);
     executeMove(from, to, promotion);
+  };
+
+  /* ============================================================
+     Круговой турнир: полностью автоматический процесс.
+     Координатор (тренер) собирает результаты и сам запускает следующий тур.
+     Каждая партия идёт локально у двух игроков; ходы летят через Broadcast,
+     а FEN + остаток времени + clock_updated_at пишутся в БД только при ходе.
+     ============================================================ */
+  const tournamentRunning = tournament?.status === 'running';
+
+  const updateGameCtx = (next) => {
+    gameCtxRef.current = next;
+    setGameCtx(next);
+  };
+
+  const clearNextRoundTimer = () => {
+    if (nextRoundTimerRef.current) {
+      clearTimeout(nextRoundTimerRef.current);
+      nextRoundTimerRef.current = null;
+    }
+  };
+
+  const cancelCountdown = () => {
+    if (countdownTimerRef.current) {
+      clearTimeout(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    countdownActiveRef.current = false;
+    setCountdown(null);
+  };
+
+  // Отсчёт 5‑4‑3‑2‑1 со звуком; по нулю вызывается onGo (старт часов и разблокировка ходов)
+  const runCountdown = (ms, onGo) => {
+    cancelCountdown();
+    countdownActiveRef.current = true;
+    const endAt = Date.now() + ms;
+    let shown = null;
+    const step = () => {
+      const left = endAt - Date.now();
+      if (left <= 0) {
+        countdownActiveRef.current = false;
+        setCountdown(0);
+        playSound('go');
+        onGo();
+        countdownTimerRef.current = setTimeout(() => {
+          countdownTimerRef.current = null;
+          setCountdown(null);
+        }, 900);
+        return;
+      }
+      const sec = Math.ceil(left / 1000);
+      if (sec !== shown) {
+        shown = sec;
+        setCountdown(sec);
+        playSound('tick');
+      }
+      countdownTimerRef.current = setTimeout(step, Math.min(100, left));
+    };
+    step();
+  };
+
+  const stopLocalGame = () => {
+    cancelCountdown();
+    clockStartedRef.current = false;
+    setClockStarted(false);
+    setTimerW(timerWRef.current);
+    setTimerB(timerBRef.current);
+    setCanStudentMove(false);
+    canStudentMoveRef.current = false;
+    setPendingPromotion(null);
+    try {
+      chessboardInstance.current?.removeLegalMovesMarkers();
+    } catch {
+      // нет маркеров
+    }
+  };
+
+  const persistTournamentMeta = async (state) => {
+    if (!lesson?.id) return;
+    try {
+      const { error } = await supabase
+        .from('lessons')
+        .update({ tournament_state: state })
+        .eq('id', lesson.id);
+      if (error) {
+        console.warn('Состояние турнира не сохранено (нужна колонка lessons.tournament_state):', error.message);
+      }
+    } catch (e) {
+      console.warn('Состояние турнира не сохранено:', e);
+    }
+  };
+
+  const persistTournamentGame = async (resultInfo = null) => {
+    const ctx = gameCtxRef.current;
+    const st = tournamentRef.current;
+    if (!ctx || !st || !ctx.myColor || !lesson?.id) return;
+    try {
+      const { error } = await supabase.from('tournament_games').upsert(
+        {
+          tournament_id: st.id,
+          lesson_id: String(lesson.id),
+          round: ctx.round,
+          table_no: ctx.table,
+          white_id: ctx.whiteId,
+          black_id: ctx.blackId,
+          fen: gameRef.current.fen(),
+          moves: gameRef.current.history(),
+          timer_w: Math.round(timerWRef.current),
+          timer_b: Math.round(timerBRef.current),
+          active_color: activeColorRef.current,
+          clock_updated_at: new Date().toISOString(),
+          result: resultInfo?.result ?? null,
+          reason: resultInfo?.reason ?? null,
+        },
+        { onConflict: 'tournament_id,round,table_no' }
+      );
+      if (error) {
+        console.warn('Партия не сохранена (нужна таблица tournament_games):', error.message);
+      }
+    } catch (e) {
+      console.warn('Партия не сохранена:', e);
+    }
+  };
+
+  const fetchTableRow = async (st, table) => {
+    try {
+      const { data, error } = await supabase
+        .from('tournament_games')
+        .select('*')
+        .eq('tournament_id', st.id)
+        .eq('round', st.round)
+        .eq('table_no', table)
+        .maybeSingle();
+      if (error) return null;
+      return data || null;
+    } catch {
+      return null;
+    }
+  };
+
+  // Применяет «снимок» стола: позиция + часы. При running и updatedAt остаток
+  // времени = остаток − (сейчас − clock_updated_at).
+  const applyTableSnapshot = ({ moves = [], timerW: w0, timerB: b0, updatedAt = null, running = true }) => {
+    const { game, tree: nextTree, currentId: nextCurrentId } = replayMoves(moves);
+    gameRef.current = game;
+    const turn = game.turn();
+
+    let w = w0;
+    let b = b0;
+    if (running && updatedAt) {
+      const elapsed = Math.max(0, Date.now() - new Date(updatedAt).getTime());
+      if (turn === 'w') w = Math.max(0, w - elapsed);
+      else b = Math.max(0, b - elapsed);
+    }
+
+    const alive = running && w > 0 && b > 0;
+    lowTimeWarnedRef.current = { w: w <= LOW_TIME_MS, b: b <= LOW_TIME_MS };
+    timerWRef.current = w;
+    timerBRef.current = b;
+    activeColorRef.current = turn;
+    clockStartedRef.current = alive;
+    treeRef.current = nextTree;
+    currentIdRef.current = nextCurrentId;
+    lastTickRef.current = Date.now();
+
+    setTimerW(w);
+    setTimerB(b);
+    setActiveColor(turn);
+    setClockStarted(alive);
+    setTree(nextTree);
+    setCurrentId(nextCurrentId);
+    setPendingPromotion(null);
+    paintClocks();
+
+    const board = chessboardInstance.current;
+    if (board) {
+      try {
+        board.removeLegalMovesMarkers();
+      } catch {
+        // нет маркеров
+      }
+      board.removeMarkers();
+      board.removeArrows();
+      board.setPosition(game.fen(), false);
+    }
+
+    let expiredColor = null;
+    if (running) {
+      if (w <= 0) expiredColor = 'w';
+      else if (b <= 0) expiredColor = 'b';
+    }
+    return { expiredColor };
+  };
+
+  // Вход в тур: определяем соперника, цвет, ориентацию доски, ставим часы и позицию.
+  // restore=true — берём состояние стола из БД (перезагрузка страницы / поздний вход).
+  const enterRound = async (st, restore = false) => {
+    const me = await ensureCurrentUser();
+    tournamentRef.current = st;
+    setTournament(st);
+    clearNextRoundTimerIfNotCoordinator();
+
+    const roundInfo = st.schedule[st.round - 1];
+    if (!roundInfo) return;
+
+    const tc = st.settings.timeControl;
+    const totalMs = tc.min * 60 * 1000;
+    const incMs = tc.inc * 1000;
+    incrementMsRef.current = incMs;
+    setIncrementMs(incMs);
+
+    const myPair =
+      !isObserver && me
+        ? roundInfo.pairings.find((p) => p.white.id === me.id || p.black.id === me.id)
+        : null;
+    const pair = myPair || roundInfo.pairings[0];
+    if (!pair) return;
+    const myColor = myPair ? (myPair.white.id === me.id ? 'w' : 'b') : null;
+
+    const row = restore ? await fetchTableRow(st, pair.table) : null;
+    const savedResult = st.results?.[`${st.round}:${pair.table}`] || null;
+    const rowResult = row?.result ? { result: row.result, reason: row.reason || 'draw' } : null;
+    const finalResult = savedResult || rowResult;
+
+    updateGameCtx({
+      tournamentId: st.id,
+      round: st.round,
+      table: pair.table,
+      whiteId: pair.white.id,
+      blackId: pair.black.id,
+      myColor,
+      finished: !!finalResult,
+      result: finalResult,
+    });
+
+    setOrientation(myColor === 'b' ? COLOR.black : COLOR.white);
+
+    const startsAtMs = Date.parse(st.roundStartedAt) + COUNTDOWN_SECONDS * 1000;
+    const startsAtIso = new Date(startsAtMs).toISOString();
+    const live = !finalResult && !st.paused;
+
+    let snapshot = { moves: [], timerW: totalMs, timerB: totalMs, running: live };
+    if (restore) {
+      snapshot = row
+        ? {
+            moves: row.moves || [],
+            timerW: row.timer_w,
+            timerB: row.timer_b,
+            updatedAt: st.paused ? null : row.clock_updated_at,
+            running: live,
+          }
+        : { moves: [], timerW: totalMs, timerB: totalMs, updatedAt: startsAtIso, running: live };
+    }
+
+    // Партия ещё не начиналась — сначала отсчёт 5‑4‑3‑2‑1, часы и ходы заморожены
+    let startDelayMs = 0;
+    if (live && snapshot.moves.length === 0 && (!restore || !row)) {
+      const target = restore ? startsAtMs : Date.now() + COUNTDOWN_SECONDS * 1000;
+      startDelayMs = Math.min(COUNTDOWN_SECONDS * 1000, Math.max(0, target - Date.now()));
+    }
+
+    cancelCountdown();
+    const { expiredColor } = applyTableSnapshot({
+      ...snapshot,
+      running: snapshot.running && startDelayMs === 0,
+    });
+
+    const canPlay = !!myColor && live && !expiredColor && startDelayMs === 0;
+    setCanStudentMove(canPlay);
+    canStudentMoveRef.current = canPlay;
+
+    if (startDelayMs > 0) {
+      runCountdown(startDelayMs, () => {
+        lastTickRef.current = Date.now();
+        clockStartedRef.current = true;
+        setClockStarted(true);
+        const ctxNow = gameCtxRef.current;
+        const ok = !!ctxNow?.myColor && !ctxNow.finished && !tournamentRef.current?.paused;
+        setCanStudentMove(ok);
+        canStudentMoveRef.current = ok;
+      });
+    }
+
+    if (expiredColor) clockExpiredRef.current?.(expiredColor);
+  };
+
+  // Не координатор не должен держать таймер перехода между турами
+  const clearNextRoundTimerIfNotCoordinator = () => {
+    if (!isTeacher) clearNextRoundTimer();
+  };
+
+  // Наблюдение за другим столом (тренер без партии, отдыхающие игроки, наблюдатели)
+  const watchTournamentTable = async (table) => {
+    const st = tournamentRef.current;
+    const ctx = gameCtxRef.current;
+    if (!st || st.status !== 'running' || (ctx && ctx.myColor)) return;
+    if (ctx && ctx.table === table && ctx.round === st.round) return;
+    const pair = st.schedule[st.round - 1]?.pairings.find((p) => p.table === table);
+    if (!pair) return;
+
+    const row = await fetchTableRow(st, table);
+    const res = st.results?.[`${st.round}:${table}`] || null;
+    const tc = st.settings.timeControl;
+    const totalMs = tc.min * 60 * 1000;
+
+    updateGameCtx({
+      tournamentId: st.id,
+      round: st.round,
+      table,
+      whiteId: pair.white.id,
+      blackId: pair.black.id,
+      myColor: null,
+      finished: !!res,
+      result: res,
+    });
+
+    const { expiredColor } = applyTableSnapshot(
+      row
+        ? {
+            moves: row.moves || [],
+            timerW: row.timer_w,
+            timerB: row.timer_b,
+            updatedAt: st.paused ? null : row.clock_updated_at,
+            running: !res && !row.result && !st.paused,
+          }
+        : {
+            moves: [],
+            timerW: totalMs,
+            timerB: totalMs,
+            updatedAt: new Date(Date.parse(st.roundStartedAt) + COUNTDOWN_SECONDS * 1000).toISOString(),
+            running: !res && !st.paused,
+          }
+    );
+    if (expiredColor) clockExpiredRef.current?.(expiredColor);
+  };
+
+  // Игрок фиксирует итог своей партии: стопорим часы, шлём результат координатору
+  const reportTournamentResult = (res) => {
+    const ctx = gameCtxRef.current;
+    const st = tournamentRef.current;
+    if (!ctx || !st || ctx.finished || !ctx.myColor) return;
+
+    updateGameCtx({ ...ctx, finished: true, result: res });
+    stopLocalGame();
+
+    const payload = {
+      event: 'game_result',
+      tournamentId: st.id,
+      round: ctx.round,
+      table: ctx.table,
+      result: res.result,
+      reason: res.reason,
+    };
+    channelRef.current?.send({ type: 'broadcast', event: 'tournament_action', payload });
+    persistTournamentGame(res);
+    if (isTeacher) recordTournamentResult(payload);
+  };
+
+  // Собственный ход в турнирной партии
+  const playTournamentMove = (from, to, promotion) => {
+    const ctx = gameCtxRef.current;
+    const st = tournamentRef.current;
+    const resetBoard = () => chessboardInstance.current?.setPosition(gameRef.current.fen());
+
+    if (!ctx || !st || !ctx.myColor || ctx.finished) {
+      resetBoard();
+      return false;
+    }
+    if (gameRef.current.turn() !== ctx.myColor || countdownActiveRef.current || st.paused) {
+      resetBoard();
+      return false;
+    }
+
+    // Фиксируем точный остаток времени на момент хода
+    tickClock();
+    if (gameCtxRef.current?.finished) {
+      resetBoard();
+      return false;
+    }
+
+    let move = null;
+    try {
+      move = gameRef.current.move({ from, to, promotion });
+    } catch {
+      move = null;
+    }
+    if (!move) {
+      resetBoard();
+      return false;
+    }
+
+    const newFen = gameRef.current.fen();
+    applyRemoteMove(move, newFen); // дерево ходов, звук, +инкремент, смена очереди часов
+    lastTickRef.current = Date.now();
+
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'tournament_action',
+      payload: {
+        event: 'game_move',
+        tournamentId: st.id,
+        round: ctx.round,
+        table: ctx.table,
+        from,
+        to,
+        promotion,
+        san: move.san,
+        fen: newFen,
+        ply: gameRef.current.history().length,
+        timerW: Math.round(timerWRef.current),
+        timerB: Math.round(timerBRef.current),
+        activeColor: activeColorRef.current,
+        clockUpdatedAt: new Date().toISOString(),
+      },
+    });
+    persistTournamentGame();
+
+    const over = detectGameOver(gameRef.current);
+    if (over) reportTournamentResult(over);
+    return true;
+  };
+
+  // Повторная загрузка стола из БД (пропущен ход / рассинхрон)
+  const resyncTable = async (table) => {
+    const st = tournamentRef.current;
+    if (!st) return;
+    const row = await fetchTableRow(st, table);
+    const ctx = gameCtxRef.current;
+    if (!row || !ctx || ctx.table !== table || ctx.round !== st.round) return;
+    const finished = ctx.finished || !!row.result || !!st.results?.[`${st.round}:${table}`];
+    const { expiredColor } = applyTableSnapshot({
+      moves: row.moves || [],
+      timerW: row.timer_w,
+      timerB: row.timer_b,
+      updatedAt: st.paused ? null : row.clock_updated_at,
+      running: !finished && !st.paused,
+    });
+    if (expiredColor) clockExpiredRef.current?.(expiredColor);
+  };
+
+  // Ход соперника (или ход на наблюдаемом столе)
+  const applyRemoteTournamentMove = (payload) => {
+    const ctx = gameCtxRef.current;
+    const st = tournamentRef.current;
+    if (!ctx || !st || st.status !== 'running' || ctx.finished) return;
+    if (payload.tournamentId !== st.id || payload.round !== ctx.round || payload.table !== ctx.table) {
+      return;
+    }
+
+    const game = gameRef.current;
+    const plyNow = game.history().length;
+    if (payload.ply <= plyNow) return; // дубликат
+    if (payload.ply !== plyNow + 1) {
+      resyncTable(ctx.table);
+      return;
+    }
+
+    let move = null;
+    try {
+      move = game.move({
+        from: payload.from,
+        to: payload.to,
+        promotion: payload.promotion || 'q',
+      });
+    } catch {
+      move = null;
+    }
+    if (!move) {
+      resyncTable(ctx.table);
+      return;
+    }
+
+    applyRemoteMove(move, game.fen());
+
+    // Остаток времени после хода — от того, кто его сделал (без сетевых запросов каждую секунду)
+    timerWRef.current = payload.timerW;
+    timerBRef.current = payload.timerB;
+    activeColorRef.current = game.turn();
+    setTimerW(payload.timerW);
+    setTimerB(payload.timerB);
+    setActiveColor(game.turn());
+    lastTickRef.current = Date.now();
+    paintClocks();
+
+    if (ctx.myColor) {
+      const over = detectGameOver(game);
+      if (over) reportTournamentResult(over);
+    }
+  };
+
+  /* ----- Координатор (тренер) ----- */
+
+  const publishTournamentState = (state) => {
+    tournamentRef.current = state;
+    setTournament(state);
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'tournament_action',
+      payload: { event: 'state_update', state },
+    });
+    persistTournamentMeta(state);
+  };
+
+  const launchRound = (state) => {
+    tournamentRef.current = state;
+    setTournament(state);
+    persistTournamentMeta(state);
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'tournament_action',
+      payload: { event: 'round_start', state },
+    });
+    enterRound(state, false);
+  };
+
+  const runNextRound = () => {
+    nextRoundTimerRef.current = null;
+    const cur = tournamentRef.current;
+    if (!cur || cur.status !== 'running') return;
+    launchRound({
+      ...cur,
+      round: cur.round + 1,
+      nextRoundAt: null,
+      roundStartedAt: new Date().toISOString(),
+    });
+  };
+
+  const scheduleNextRound = (state) => {
+    clearNextRoundTimer();
+    publishTournamentState({
+      ...state,
+      nextRoundAt: new Date(Date.now() + ROUND_PAUSE_MS).toISOString(),
+    });
+    nextRoundTimerRef.current = setTimeout(() => {
+      tournamentApiRef.current.runNextRound?.();
+    }, ROUND_PAUSE_MS);
+  };
+
+  const finishTournament = (state) => {
+    clearNextRoundTimer();
+    publishTournamentState({ ...state, status: 'finished', nextRoundAt: null });
+    stopLocalGame();
+  };
+
+  const recordTournamentResult = ({ tournamentId, round, table, result, reason }) => {
+    if (!isTeacher) return;
+    const st = tournamentRef.current;
+    if (!st || st.status !== 'running' || st.id !== tournamentId || st.round !== round) return;
+    const key = `${round}:${table}`;
+    if (st.results[key]) return; // результат стола уже занесён
+
+    const next = { ...st, results: { ...st.results, [key]: { result, reason } } };
+    const roundDone = next.schedule[round - 1].pairings.every(
+      (p) => next.results[`${round}:${p.table}`]
+    );
+
+    if (!roundDone || next.paused) {
+      publishTournamentState(next);
+    } else if (round >= next.totalRounds) {
+      finishTournament(next);
+    } else {
+      scheduleNextRound(next);
+    }
+  };
+
+  const startTournament = () => {
+    if (!isTeacher || isObserver || tournamentRef.current?.status === 'running') return;
+    const players = lessonParticipants;
+    if (players.length < 2) {
+      window.alert('Для турнира нужно минимум 2 участника.');
+      return;
+    }
+    const schedule = generateRoundRobinSchedule(players);
+    launchRound({
+      id: `${Date.now().toString(36)}${generateId()}`,
+      status: 'running',
+      settings: {
+        includeTeacher: tournamentSettings.includeTeacher,
+        timeControl: { ...tournamentSettings.timeControl },
+      },
+      participants: players,
+      schedule,
+      totalRounds: schedule.length,
+      round: 1,
+      results: {},
+      roundStartedAt: new Date().toISOString(),
+      nextRoundAt: null,
+    });
+  };
+
+  const endTournament = () => {
+    if (!isTeacher) return;
+    clearNextRoundTimer();
+    tournamentRef.current = null;
+    setTournament(null);
+    updateGameCtx(null);
+    stopLocalGame();
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'tournament_action',
+      payload: { event: 'tournament_end' },
+    });
+    persistTournamentMeta(null);
+  };
+
+  const abortTournament = () => {
+    if (!window.confirm('Завершить турнир досрочно? Незавершённые партии не будут засчитаны.')) return;
+    endTournament();
+  };
+
+  // Пауза: часы у всех встают, ходы блокируются; время простоя не списывается
+  const pauseLocalClock = () => {
+    tickClock();
+    clockStartedRef.current = false;
+    setClockStarted(false);
+    setTimerW(timerWRef.current);
+    setTimerB(timerBRef.current);
+    paintClocks();
+    const ctx = gameCtxRef.current;
+    if (ctx?.myColor && !ctx.finished) persistTournamentGame();
+  };
+
+  const resumeLocalClock = () => {
+    const ctx = gameCtxRef.current;
+    if (!ctx || ctx.finished || countdownActiveRef.current) return;
+    lastTickRef.current = Date.now();
+    clockStartedRef.current = true;
+    setClockStarted(true);
+    if (ctx.myColor) persistTournamentGame(); // обновляем clock_updated_at на момент возобновления
+  };
+
+  const pauseTournament = () => {
+    const st = tournamentRef.current;
+    if (!isTeacher || !st || st.status !== 'running' || st.paused) return;
+    if (st.nextRoundAt || countdownActiveRef.current) return;
+    pauseLocalClock();
+    publishTournamentState({ ...st, paused: true });
+  };
+
+  const resumeTournament = () => {
+    const st = tournamentRef.current;
+    if (!isTeacher || !st || st.status !== 'running' || !st.paused) return;
+    const resumed = { ...st, paused: false };
+    const roundDone = resumed.schedule[resumed.round - 1].pairings.every(
+      (p) => resumed.results[`${resumed.round}:${p.table}`]
+    );
+    if (roundDone) {
+      // тур закончился во время паузы — идём дальше
+      if (resumed.round >= resumed.totalRounds) finishTournament(resumed);
+      else scheduleNextRound(resumed);
+      return;
+    }
+    publishTournamentState(resumed);
+    resumeLocalClock();
+  };
+
+  const resignTournamentGame = () => {
+    const ctx = gameCtxRef.current;
+    if (!ctx || !ctx.myColor || ctx.finished) return;
+    reportTournamentResult({
+      result: ctx.myColor === 'w' ? '0-1' : '1-0',
+      reason: 'resign',
+    });
+  };
+
+  /* ----- Приём общего состояния ----- */
+
+  const adoptTournamentState = (st) => {
+    if (!st) return;
+    const cur = tournamentRef.current;
+    if (cur && cur.id === st.id && st.round < cur.round) return;
+
+    tournamentRef.current = st;
+    setTournament(st);
+
+    if (st.status === 'finished') {
+      stopLocalGame();
+      return;
+    }
+
+    if (cur && cur.id === st.id && !!st.paused !== !!cur.paused) {
+      if (st.paused) pauseLocalClock();
+      else resumeLocalClock();
+    }
+
+    const ctx = gameCtxRef.current;
+    // Пропустили начало тура — входим в него, восстанавливая стол из БД
+    if (!ctx || ctx.tournamentId !== st.id || ctx.round < st.round) {
+      enterRound(st, true);
+      return;
+    }
+    if (!ctx.finished && ctx.round === st.round) {
+      const res = st.results?.[`${ctx.round}:${ctx.table}`];
+      if (res) {
+        updateGameCtx({ ...ctx, finished: true, result: res });
+        stopLocalGame();
+      }
+    }
+  };
+
+  const handleTournamentAction = (payload) => {
+    if (!payload) return;
+    switch (payload.event) {
+      case 'round_start':
+        enterRound(payload.state, false);
+        break;
+      case 'state_update':
+        adoptTournamentState(payload.state);
+        break;
+      case 'tournament_end':
+        clearNextRoundTimer();
+        tournamentRef.current = null;
+        setTournament(null);
+        updateGameCtx(null);
+        stopLocalGame();
+        break;
+      case 'game_move':
+        applyRemoteTournamentMove(payload);
+        break;
+      case 'game_result':
+        recordTournamentResult(payload);
+        break;
+      default:
+        break;
+    }
+  };
+
+  // Тренер после перезагрузки: подбираем результаты, пришедшие пока он был офлайн,
+  // и возобновляем паузу между турами
+  const resumeCoordinator = async (st) => {
+    try {
+      const { data } = await supabase
+        .from('tournament_games')
+        .select('round, table_no, result, reason')
+        .eq('tournament_id', st.id)
+        .eq('round', st.round)
+        .not('result', 'is', null);
+      (data || []).forEach((row) =>
+        recordTournamentResult({
+          tournamentId: st.id,
+          round: row.round,
+          table: row.table_no,
+          result: row.result,
+          reason: row.reason || 'draw',
+        })
+      );
+    } catch (e) {
+      console.warn('Не удалось подобрать результаты турнира:', e);
+    }
+
+    const cur = tournamentRef.current;
+    if (cur?.status === 'running' && cur.nextRoundAt && !nextRoundTimerRef.current) {
+      const left = Math.max(0, Date.parse(cur.nextRoundAt) - Date.now());
+      nextRoundTimerRef.current = setTimeout(() => {
+        tournamentApiRef.current.runNextRound?.();
+      }, left);
+    }
+  };
+
+  // Восстановление после обновления страницы / позднего входа в комнату
+  const restoreTournament = async () => {
+    if (!lesson?.id) return;
+    try {
+      await ensureCurrentUser();
+      const { data, error } = await supabase
+        .from('lessons')
+        .select('tournament_state')
+        .eq('id', lesson.id)
+        .maybeSingle();
+      if (error || !data?.tournament_state) return;
+
+      const st = data.tournament_state;
+      if (!st.id || !st.schedule) return;
+
+      const cur = tournamentRef.current;
+      if (cur && cur.id === st.id && cur.round >= st.round) return; // уже синхронизированы по Broadcast
+
+      tournamentRef.current = st;
+      setTournament(st);
+      if (st.status !== 'running') return;
+
+      await enterRound(st, true);
+      if (isTeacher) await resumeCoordinator(st);
+    } catch (e) {
+      console.warn('Не удалось восстановить турнир:', e);
+    }
+  };
+
+  // Конец времени: в турнире — результат партии, в обычном уроке — как раньше
+  const handleClockExpired = (color) => {
+    clockStartedRef.current = false;
+    setClockStarted(false);
+    setTimerW(timerWRef.current);
+    setTimerB(timerBRef.current);
+    paintClocks();
+
+    const ctx = gameCtxRef.current;
+    if (tournamentRef.current?.status === 'running' && ctx) {
+      if (ctx.myColor && !ctx.finished) {
+        const opponent = color === 'w' ? 'b' : 'w';
+        reportTournamentResult(
+          hasMatingMaterial(gameRef.current, opponent)
+            ? { result: color === 'w' ? '0-1' : '1-0', reason: 'timeout' }
+            : { result: '1/2-1/2', reason: 'insufficient' }
+        );
+      }
+      return;
+    }
+
+    if (isTeacher) {
+      saveState(gameRef.current.fen(), canStudentMoveRef.current);
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'clock_state',
+        payload: {
+          timerW: timerWRef.current,
+          timerB: timerBRef.current,
+          incrementMs: incrementMsRef.current,
+          activeColor: activeColorRef.current,
+          clockStarted: false,
+        },
+      });
+    }
+  };
+
+  // Ученик записывается в турнир / выходит из лобби (Presence на канале урока)
+  const toggleLobby = async () => {
+    if (isTeacher || isObserver || !channelRef.current) return;
+    const user = await ensureCurrentUser();
+    if (!user) {
+      window.alert('Войдите в аккаунт, чтобы участвовать в турнире.');
+      return;
+    }
+    const next = !lobbyJoinedRef.current;
+    try {
+      if (next) {
+        await channelRef.current.track({ user_id: user.id, name: user.name, joined: true });
+      } else {
+        await channelRef.current.untrack();
+      }
+      lobbyJoinedRef.current = next;
+      setLobbyJoined(next);
+    } catch (e) {
+      console.error('Не удалось изменить запись на турнир:', e);
+    }
+  };
+
+  // Обработчики всегда видят свежие замыкания через ref (канал создаётся один раз)
+  tournamentApiRef.current = {
+    playMove: playTournamentMove,
+    handleAction: handleTournamentAction,
+    runNextRound,
+  };
+  restoreTournamentRef.current = restoreTournament;
+  clockExpiredRef.current = handleClockExpired;
+
+  useEffect(
+    () => () => {
+      if (nextRoundTimerRef.current) clearTimeout(nextRoundTimerRef.current);
+    },
+    []
+  );
+
+  // Клетка под указателем в момент отпускания (с запасом на рамку доски)
+  const resolveDropSquare = () => {
+    const el = boardRef.current;
+    const p = lastPointerRef.current;
+    if (!el || p.x == null) return null;
+    const r = el.getBoundingClientRect();
+    const tol = 14;
+    if (p.x < r.left - tol || p.x > r.right + tol || p.y < r.top - tol || p.y > r.bottom + tol) {
+      return null;
+    }
+    const idx = (v) => Math.min(7, Math.max(0, Math.floor(v)));
+    const col = idx(((p.x - r.left) / r.width) * 8);
+    const row = idx(((p.y - r.top) / r.height) * 8);
+    const whiteBottom = orientationRef.current === COLOR.white;
+    const file = whiteBottom ? col : 7 - col;
+    const rank = whiteBottom ? 8 - row : row + 1;
+    return `${String.fromCharCode(97 + file)}${rank}`;
   };
 
   useEffect(() => {
@@ -834,12 +2423,34 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         chessboardInstance.current.enableMoveInput((event) => {
           if (isEditorModeRef.current) {
             if (event.type === 'moveInputStarted') return true;
-            if (event.type === 'moveInputFinished' && event.squareFrom && !event.squareTo) {
+            if (event.type === 'moveInputFinished' && event.squareFrom) {
+              // Если библиотека не определила клетку (отпустили у самого края/в углу),
+              // определяем её по координатам указателя. Удаляем фигуру, только если
+              // её реально утащили за пределы доски.
+              let target = event.squareTo || null;
+              let removeIt = false;
+              if (!target) {
+                target = resolveDropSquare();
+                removeIt = !target;
+              }
+
+              if (!removeIt && target === event.squareFrom) {
+                chessboardInstance.current?.setPosition(tempEditorFenRef.current, false);
+                return false;
+              }
+
               const fromFile = event.squareFrom.charCodeAt(0) - 97;
               const fromRank = 8 - parseInt(event.squareFrom[1]);
+              const toFile = target ? target.charCodeAt(0) - 97 : 0;
+              const toRank = target ? 8 - parseInt(target[1]) : 0;
+
               const updated = updateFenBoard(tempEditorFenRef.current, (board) => {
+                const piece = board[fromRank][fromFile];
                 board[fromRank][fromFile] = null;
+                // не затираем клетку назначения, если на исходной уже ничего нет
+                if (!removeIt && piece) board[toRank][toFile] = piece;
               });
+
               const fullUpdatedFen = buildFullFen(
                 updated,
                 editorTurnRef.current,
@@ -848,32 +2459,36 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
               tempEditorFenRef.current = fullUpdatedFen;
               setTempEditorFen(fullUpdatedFen);
               chessboardInstance.current?.setPosition(fullUpdatedFen, false);
-              return false;
-            }
-            if (event.type === 'moveInputFinished' && event.squareFrom && event.squareTo) {
-              const fromFile = event.squareFrom.charCodeAt(0) - 97;
-              const fromRank = 8 - parseInt(event.squareFrom[1]);
-              const toFile = event.squareTo.charCodeAt(0) - 97;
-              const toRank = 8 - parseInt(event.squareTo[1]);
-
-              const updated = updateFenBoard(tempEditorFenRef.current, (board) => {
-                const piece = board[fromRank][fromFile];
-                board[fromRank][fromFile] = null;
-                board[toRank][toFile] = piece;
-              });
-
-              const fullUpdatedFen = buildFullFen(
-                updated,
-                editorTurnRef.current,
-                editorCastlingRef.current
-              );
-              tempEditorFenRef.current = fullUpdatedFen;
-              setTempEditorFen(fullUpdatedFen);
-              if (chessboardInstance.current) {
-                chessboardInstance.current.setPosition(fullUpdatedFen, false);
-              }
             }
             return false;
+          }
+
+          if (tournamentRef.current?.status === 'running') {
+            const tctx = gameCtxRef.current;
+            const canPlay =
+              !isObserver &&
+              tctx &&
+              tctx.myColor &&
+              !tctx.finished &&
+              !countdownActiveRef.current &&
+              !tournamentRef.current?.paused;
+            if (!canPlay) {
+              try {
+                chessboardInstance.current?.removeLegalMovesMarkers();
+                chessboardInstance.current?.setPosition(gameRef.current.fen());
+              } catch {}
+              return false;
+            }
+            if (event.type === 'moveInputStarted' && event.squareFrom) {
+              const pieceAtSquare = gameRef.current.get(event.squareFrom);
+              if (
+                !pieceAtSquare ||
+                pieceAtSquare.color !== tctx.myColor ||
+                gameRef.current.turn() !== tctx.myColor
+              ) {
+                return false;
+              }
+            }
           }
 
           if (isObserver || (!isTeacher && !canStudentMoveRef.current)) {
@@ -885,10 +2500,16 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
           }
 
           if (event.type === 'moveInputStarted' && event.squareFrom) {
-            const legalMoves = gameRef.current.moves({
-              square: event.squareFrom,
-              verbose: true,
-            });
+            let legalMoves = [];
+            try {
+              legalMoves = gameRef.current.moves({
+                square: event.squareFrom,
+                verbose: true,
+              });
+            } catch (err) {
+              console.error('Не удалось получить ходы для клетки', event.squareFrom, err);
+              return false;
+            }
 
             event.chessboard.removeLegalMovesMarkers();
 
@@ -928,6 +2549,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       } catch (err) {
         console.error('Ошибка инициализации cm-chessboard:', err);
       }
+
+      if (!cancelled) restoreTournamentRef.current?.();
     };
 
     initFromDb();
@@ -945,6 +2568,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         { event: 'make_move' },
         ({ payload }) => {
           if (!payload) return;
+          if (tournamentRef.current?.status === 'running') return;
           if (payload.from && payload.to) {
             try {
               const move = gameRef.current.move({
@@ -957,14 +2581,12 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                 if (payload.timerW !== undefined) {
                   timerWRef.current = payload.timerW;
                   setTimerW(payload.timerW);
-                  if (whiteClockDomRef.current)
-                    whiteClockDomRef.current.textContent = formatTime(payload.timerW);
+                  paintClocks();
                 }
                 if (payload.timerB !== undefined) {
                   timerBRef.current = payload.timerB;
                   setTimerB(payload.timerB);
-                  if (blackClockDomRef.current)
-                    blackClockDomRef.current.textContent = formatTime(payload.timerB);
+                  paintClocks();
                 }
                 if (payload.activeColor !== undefined) {
                   activeColorRef.current = payload.activeColor;
@@ -996,17 +2618,16 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       )
       .on('broadcast', { event: 'clock_state' }, ({ payload }) => {
         if (!payload) return;
+        if (tournamentRef.current?.status === 'running') return;
         if (payload.timerW !== undefined) {
           timerWRef.current = payload.timerW;
           setTimerW(payload.timerW);
-          if (whiteClockDomRef.current)
-            whiteClockDomRef.current.textContent = formatTime(payload.timerW);
+          paintClocks();
         }
         if (payload.timerB !== undefined) {
           timerBRef.current = payload.timerB;
           setTimerB(payload.timerB);
-          if (blackClockDomRef.current)
-            blackClockDomRef.current.textContent = formatTime(payload.timerB);
+          paintClocks();
         }
         if (payload.incrementMs !== undefined) {
           incrementMsRef.current = payload.incrementMs;
@@ -1023,6 +2644,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       })
       .on('broadcast', { event: 'student_access' }, ({ payload }) => {
         if (!payload) return;
+        if (tournamentRef.current?.status === 'running') return;
         if (payload.canStudentMove !== undefined) {
           const val = payload.canStudentMove;
           setCanStudentMove(val);
@@ -1036,11 +2658,16 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         }
       })
       .on('broadcast', { event: 'board_orientation' }, ({ payload }) => {
+        if (tournamentRef.current?.status === 'running') return;
         if (payload?.orientation !== COLOR.white && payload?.orientation !== COLOR.black) return;
         setOrientation(payload.orientation);
       })
       .on('broadcast', { event: 'draw_annotation' }, ({ payload }) => {
         if (!payload || !chessboardInstance.current) return;
+        {
+          const tctx = gameCtxRef.current;
+          if (tournamentRef.current?.status === 'running' && tctx?.myColor && !tctx.finished) return;
+        }
 
         if (payload.kind === 'circle' && payload.square) {
           if (payload.visible)
@@ -1059,6 +2686,19 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         if (!chessboardInstance.current) return;
         chessboardInstance.current.removeMarkers();
         chessboardInstance.current.removeArrows();
+      })
+      .on('broadcast', { event: 'tournament_action' }, ({ payload }) => {
+        tournamentApiRef.current.handleAction?.(payload);
+      })
+      .on('presence', { event: 'sync' }, () => {
+        const players = [];
+        Object.values(channel.presenceState()).forEach((entries) => {
+          entries.forEach((p) => {
+            if (p?.joined && p.user_id) players.push({ id: p.user_id, name: p.name || 'Ученик' });
+          });
+        });
+        const seen = new Set();
+        setLobbyPlayers(players.filter((p) => !seen.has(p.id) && seen.add(p.id)));
       });
 
     channelRef.current = channel;
@@ -1068,6 +2708,15 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       .then(() => {
         if (channelCancelled) return;
         channel.subscribe((status, error) => {
+          if (status === 'SUBSCRIBED' && lobbyJoinedRef.current && currentUserRef.current) {
+            channel
+              .track({
+                user_id: currentUserRef.current.id,
+                name: currentUserRef.current.name,
+                joined: true,
+              })
+              .catch(() => {});
+          }
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
             console.error('Ошибка Realtime-канала:', status, error);
           }
@@ -1091,8 +2740,19 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         chessboardInstance.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lesson?.id, applyRemoteMove, executeMove, isTeacher, isObserver]);
+
+  useEffect(() => {
+    const record = (e) => {
+      lastPointerRef.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener('pointerup', record, true);
+    window.addEventListener('mouseup', record, true);
+    return () => {
+      window.removeEventListener('pointerup', record, true);
+      window.removeEventListener('mouseup', record, true);
+    };
+  }, []);
 
   const setEditorSquare = (square, fenChar) => {
     if (!isEditorMode || !square) return;
@@ -1130,12 +2790,21 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
   const handleBoardClickForEditor = (e) => {
     if (!isEditorMode) return;
-    const squareEl = e.target.closest('[data-square]');
+    // Это было перетаскивание фигуры, а не клик — не трогаем клетку
+    const down = editorDownRef.current;
+    if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return;
+    // Режим перемещения: клик по доске ничего не стирает и не ставит
+    if (selectedEditorPiece === null) return;
+
+    const squareEl = e.target.closest?.('[data-square]');
     if (!squareEl) return;
     const square = squareEl.getAttribute('data-square');
     if (!square) return;
 
-    const fenChar = PIECES_PALETTE.find((p) => p.piece === selectedEditorPiece)?.fenChar;
+    const fenChar =
+      selectedEditorPiece === EDITOR_ERASER
+        ? null
+        : PIECES_PALETTE.find((p) => p.piece === selectedEditorPiece)?.fenChar;
     setEditorSquare(square, fenChar || null);
   };
 
@@ -1172,7 +2841,13 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
   const handleSaveEditorPosition = async () => {
     const boardOnly = updateFenBoard(tempEditorFen, () => {});
-    const finalFen = buildFullFen(boardOnly, editorTurn, editorCastling);
+    const rawFen = buildFullFen(boardOnly, editorTurn, editorCastling);
+    const problem = validateEditorPosition(rawFen);
+    if (problem) {
+      window.alert(`Позицию нельзя сохранить: ${problem}`);
+      return;
+    }
+    const finalFen = sanitizeCastlingInFen(rawFen);
 
     try {
       gameRef.current.load(finalFen, { skipValidation: true });
@@ -1373,7 +3048,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   const deleteMoveBranch = (nodeId, event) => {
     event?.preventDefault();
     event?.stopPropagation();
-    if (!isTeacher || !nodeId || nodeId === 'root') return;
+    if (!isTeacher || !nodeId || nodeId === 'root' || tournamentRef.current?.status === 'running') return;
 
     const activeTree = treeRef.current;
     const nodeToDelete = activeTree[nodeId];
@@ -1528,6 +3203,12 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     );
   }, [tree, currentId, isTeacher, jumpToNode]);
 
+  const standings = useMemo(() => computeStandings(tournament), [tournament]);
+  const tablePair =
+    tournament && gameCtx
+      ? tournament.schedule[gameCtx.round - 1]?.pairings.find((p) => p.table === gameCtx.table)
+      : null;
+
   if (!lesson) return <div className="p-8 text-center text-gray-500">Урок не выбран</div>;
   return (
     <div className="min-h-[calc(100vh-7rem)] bg-slate-100">
@@ -1596,7 +3277,9 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                     }`}
                   />
                   <span className="text-[11px] text-gray-500">
-                    {isObserver
+                    {tournamentRunning
+                      ? `${tournament.paused ? 'Пауза' : 'Идёт турнир'} — тур ${tournament.round} из ${tournament.totalRounds}`
+                      : isObserver
                       ? 'Режим наблюдателя — управление отключено'
                       : canStudentMove
                       ? 'Ученик может ходить'
@@ -1611,13 +3294,15 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                 <>
                   <button
                     onClick={() => setIsMaterialsOpen(true)}
-                    className="px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-xs font-bold transition cursor-pointer"
+                    disabled={tournamentRunning}
+                    className="px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-xs font-bold transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     📚 Материалы
                   </button>
                   <button
                     onClick={toggleStudentAccess}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    disabled={tournamentRunning}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
                       canStudentMove
                         ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
                         : 'bg-emerald-600 text-white hover:bg-emerald-700'
@@ -1659,6 +3344,35 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
               </div>
             )}
 
+            {tournament && gameCtx && tablePair && (
+              <div
+                className={`flex w-full max-w-[660px] flex-col gap-0.5 rounded-xl border px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between ${
+                  gameCtx.finished
+                    ? 'border-slate-200 bg-slate-50 text-slate-700'
+                    : gameCtx.myColor
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                    : 'border-blue-100 bg-blue-50 text-blue-900'
+                }`}
+              >
+                <span className="font-bold">
+                  {gameCtx.myColor
+                    ? `${gameCtx.myColor === 'w' ? '⬜ Вы играете белыми' : '⬛ Вы играете чёрными'} против ${
+                        gameCtx.myColor === 'w' ? tablePair.black.name : tablePair.white.name
+                      }`
+                    : `👁 Стол ${gameCtx.table}: ${tablePair.white.name} — ${tablePair.black.name}`}
+                </span>
+                <span className="font-semibold">
+                  {gameCtx.finished && gameCtx.result
+                    ? `${
+                        gameCtx.myColor
+                          ? `${describeMyResult(gameCtx.result, gameCtx.myColor)}: `
+                          : 'Партия окончена: '
+                      }${formatGameResult(gameCtx.result)}`
+                    : `Тур ${gameCtx.round} · стол ${gameCtx.table}`}
+                </span>
+              </div>
+            )}
+
             <div className="w-full max-w-[660px]">
               <div
                 className={`relative w-full rounded-xl border border-gray-200 overflow-hidden shadow-inner ${
@@ -1668,6 +3382,9 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
               >
                 <div
                   ref={boardRef}
+                  onPointerDownCapture={(e) => {
+                    editorDownRef.current = { x: e.clientX, y: e.clientY };
+                  }}
                   onClick={handleBoardClickForEditor}
                   onDragOver={(event) => {
                     if (isEditorMode) event.preventDefault();
@@ -1677,6 +3394,29 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                     isEditorMode ? 'cursor-crosshair' : 'cursor-pointer'
                   }`}
                 />
+                {tournament && (countdown !== null || tournament.paused) && (
+                  <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-900/55">
+                    {countdown !== null ? (
+                      <>
+                        <div className="text-sm font-bold uppercase tracking-widest text-amber-300">
+                          Тур {tournament.round} начинается
+                        </div>
+                        <div
+                          className={`font-black text-white drop-shadow ${
+                            countdown === 0 ? 'text-6xl' : 'text-9xl'
+                          }`}
+                        >
+                          {countdown === 0 ? 'Старт!' : countdown}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-6xl">⏸</div>
+                        <div className="mt-2 text-lg font-black text-white">Пауза</div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1684,6 +3424,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
               <div className="w-full max-w-[660px] grid grid-cols-2 sm:grid-cols-3 gap-2">
                 <button
                   onClick={() => {
+                    if (tournamentRef.current?.status === 'running') return;
                     const nextMode = !isEditorMode;
                     if (nextMode) {
                       const currentFen = gameRef.current.fen();
@@ -1745,7 +3486,9 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                       event.dataTransfer.setData('application/x-beechess-piece', item.fenChar);
                       setSelectedEditorPiece(item.piece);
                     }}
-                    onClick={() => setSelectedEditorPiece(item.piece)}
+                    onClick={() =>
+                      setSelectedEditorPiece(selectedEditorPiece === item.piece ? null : item.piece)
+                    }
                     title={`${item.name}: перетащите на доску или выберите кликом`}
                     className={`flex aspect-square items-center justify-center rounded border bg-white p-0.5 cursor-grab active:cursor-grabbing hover:bg-gray-100 ${
                       selectedEditorPiece === item.piece
@@ -1815,9 +3558,11 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
               <div className="flex gap-2">
                 <button
-                  onClick={() => setSelectedEditorPiece(null)}
+                  onClick={() =>
+                    setSelectedEditorPiece(selectedEditorPiece === EDITOR_ERASER ? null : EDITOR_ERASER)
+                  }
                   className={`flex-1 py-1 text-[11px] font-semibold rounded border cursor-pointer ${
-                    selectedEditorPiece === null
+                    selectedEditorPiece === EDITOR_ERASER
                       ? 'bg-red-600 text-white border-red-600'
                       : 'bg-white text-red-600 border-gray-200'
                   }`}
@@ -1837,12 +3582,19 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                   Начальная позиция
                 </button>
               </div>
+              <div className="text-[10px] text-gray-500 leading-snug">
+                {selectedEditorPiece === null
+                  ? 'Режим перемещения: фигуры на доске перетаскиваются. Выберите фигуру в палитре, чтобы ставить её кликом, или ластик, чтобы стирать.'
+                  : selectedEditorPiece === EDITOR_ERASER
+                  ? 'Ластик: клик по клетке стирает фигуру. Нажмите на ластик ещё раз, чтобы вернуться к перемещению.'
+                  : 'Клик по клетке ставит выбранную фигуру. Нажмите на неё в палитре ещё раз, чтобы вернуться к перемещению.'}
+              </div>
 
               <button
                 onClick={handleSaveEditorPosition}
                 className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition shadow-sm cursor-pointer"
               >
-                💾 Сохранить позицию (применить и начать запись ходов)
+                💾 Сохранить позицию
               </button>
             </div>
           )}
@@ -1915,10 +3667,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                     : 'bg-slate-100 text-gray-700'
                 }`}
               >
-                <div className="text-[10px] font-sans font-bold text-gray-500 mb-0.5">⬜ БЕЛЫЕ</div>
-                <span ref={whiteClockDomRef} className="text-xl font-black tracking-wider">
-                  {formatTime(timerW)}
-                </span>
+                <div className="text-[10px] font-sans font-bold text-gray-500 mb-0.5 truncate">⬜ {tablePair ? tablePair.white.name : 'БЕЛЫЕ'}</div>
+                <span ref={setWhiteClockEl} className="text-xl font-black tracking-wider" />
               </div>
               <div
                 className={`px-3 py-2.5 rounded-xl transition-all ${
@@ -1928,19 +3678,17 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                 }`}
               >
                 <div
-                  className={`text-[10px] font-sans font-bold mb-0.5 ${
+                  className={`text-[10px] font-sans font-bold mb-0.5 truncate ${
                     activeColor === 'b' && clockStarted ? 'text-gray-300' : 'text-gray-500'
                   }`}
                 >
-                  ⬛ ЧЁРНЫЕ
+                  ⬛ {tablePair ? tablePair.black.name : 'ЧЁРНЫЕ'}
                 </div>
-                <span ref={blackClockDomRef} className="text-xl font-black tracking-wider">
-                  {formatTime(timerB)}
-                </span>
+                <span ref={setBlackClockEl} className="text-xl font-black tracking-wider" />
               </div>
             </div>
 
-            {isTeacher && (
+            {isTeacher && !tournamentRunning && (
               <div className="grid grid-cols-4 gap-1.5 mt-2 text-[11px] font-sans">
                 <button
                   onClick={() => setTimeControl(3, 2)}
@@ -1973,6 +3721,30 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
               </div>
             )}
           </div>
+
+          {/* Панель кругового турнира */}
+          <TournamentPanel
+            isTeacher={isTeacher}
+            isObserver={isObserver}
+            tournament={tournament}
+            standings={standings}
+            settings={tournamentSettings}
+            onSettingsChange={setTournamentSettings}
+            participantCount={lessonParticipants.length}
+            lobbyPlayers={lobbyPlayers}
+            lobbyJoined={lobbyJoined}
+            onToggleJoin={toggleLobby}
+            currentUserId={currentUser?.id}
+            gameCtx={gameCtx}
+            onStart={startTournament}
+            onAbort={abortTournament}
+            onNewTournament={endTournament}
+            onResign={resignTournamentGame}
+            onWatchTable={watchTournamentTable}
+            onPause={pauseTournament}
+            onResume={resumeTournament}
+            countdownActive={countdown !== null}
+          />
         </aside>
       </div>
     </div>
