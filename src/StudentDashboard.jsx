@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from './supabaseClient';
+import { PuzzleSolver } from './PuzzleSolver.jsx';
 
 export const StudentDashboard = ({ onOpenLesson }) => {
   const [userId, setUserId] = useState(null);
@@ -9,10 +10,53 @@ export const StudentDashboard = ({ onOpenLesson }) => {
   const [fetching, setFetching] = useState(true);
   const [weekOffset, setWeekOffset] = useState(0);
   const [now, setNow] = useState(new Date());
+  const [homeworks, setHomeworks] = useState([]);
+  const [hwSolved, setHwSolved] = useState({});
+  const [activeHomework, setActiveHomework] = useState(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserId(data?.user?.id || null));
   }, []);
+
+  // Домашние задания ученика и сколько задач в каждом уже решено
+  const fetchHomework = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const { data: hw, error } = await supabase
+        .from('homework')
+        .select('*')
+        .contains('student_ids', [userId])
+        .order('created_at', { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      const list = hw || [];
+      setHomeworks(list);
+
+      if (list.length === 0) {
+        setHwSolved({});
+        return;
+      }
+      const { data: rs } = await supabase
+        .from('homework_results')
+        .select('homework_id, solved')
+        .eq('student_id', userId)
+        .in(
+          'homework_id',
+          list.map((h) => h.id)
+        );
+      const counts = {};
+      (rs || []).forEach((r) => {
+        if (r.solved) counts[r.homework_id] = (counts[r.homework_id] || 0) + 1;
+      });
+      setHwSolved(counts);
+    } catch (err) {
+      console.warn('Домашние задания недоступны:', err?.message || err);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    fetchHomework();
+  }, [fetchHomework]);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(new Date()), 30000);
@@ -183,6 +227,24 @@ export const StudentDashboard = ({ onOpenLesson }) => {
   const isNegativeBalance = (balance ?? 0) < 0;
   const isZeroBalance = balance === 0;
 
+  // Открыто решение задач — показываем его вместо расписания
+  if (activeHomework) {
+    return (
+      <PuzzleSolver
+        homework={activeHomework}
+        userId={userId}
+        onBack={() => {
+          setActiveHomework(null);
+          fetchHomework();
+        }}
+      />
+    );
+  }
+
+  const pendingHomework = homeworks.filter(
+    (h) => (hwSolved[h.id] || 0) < h.puzzle_ids.length
+  ).length;
+
   return (
     <div className="space-y-5 max-w-5xl mx-auto">
       <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -255,6 +317,69 @@ export const StudentDashboard = ({ onOpenLesson }) => {
           )}
         </div>
       </div>
+
+      {homeworks.length > 0 && (
+        <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-black text-gray-900">📚 Домашние задания</h3>
+            {pendingHomework > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-bold">
+                не сдано: {pendingHomework}
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            {homeworks.map((h) => {
+              const total = h.puzzle_ids.length;
+              const done = hwSolved[h.id] || 0;
+              const finished = done >= total;
+              const overdue = !finished && h.due_at && new Date(h.due_at) < now;
+              const percent = total ? Math.round((done / total) * 100) : 0;
+              return (
+                <div
+                  key={h.id}
+                  className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between p-3 rounded-xl border border-gray-100 bg-slate-50/60"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-bold text-gray-900 truncate">{h.title}</div>
+                    <div className="mt-1 flex items-center gap-2 text-[11px] text-gray-500">
+                      <span>
+                        Решено {done} из {total}
+                      </span>
+                      {h.due_at && (
+                        <span className={overdue ? 'text-red-600 font-bold' : ''}>
+                          · {overdue ? 'просрочено, ' : 'до '}
+                          {new Date(h.due_at).toLocaleDateString('ru-RU', {
+                            day: '2-digit',
+                            month: '2-digit',
+                          })}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1.5 h-1.5 w-full max-w-[260px] rounded-full bg-gray-200 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${finished ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                        style={{ width: `${percent}%` }}
+                      />
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setActiveHomework(h)}
+                    className={`shrink-0 px-4 py-2 rounded-xl text-sm font-bold cursor-pointer ${
+                      finished
+                        ? 'bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+                        : 'bg-blue-600 hover:bg-blue-700 text-white'
+                    }`}
+                  >
+                    {finished ? '✓ Посмотреть' : done > 0 ? 'Продолжить' : 'Решать'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {fetching ? (
         <div className="bg-white p-10 rounded-2xl border border-gray-200 text-center text-sm text-gray-500">

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from './supabaseClient';
+import { HomeworkTeacher } from './HomeworkTeacher.jsx';
 
 export const TeacherDashboard = ({
   onOpenRoom,
@@ -54,6 +55,16 @@ export const TeacherDashboard = ({
         >
           👥 Группы
         </button>
+        <button
+          onClick={() => setActiveTab('homework')}
+          className={`px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer ${
+            activeTab === 'homework'
+              ? 'bg-blue-600 text-white shadow-sm'
+              : 'text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          📚 Домашние задания
+        </button>
       </div>
 
       {activeTab === 'schedule' && (
@@ -65,6 +76,7 @@ export const TeacherDashboard = ({
       {activeTab === 'groups' && (
         <GroupsTab userId={userId} onOpenGroupRoom={onOpenGroupRoom} />
       )}
+      {activeTab === 'homework' && <HomeworkTeacher />}
     </div>
   );
 };
