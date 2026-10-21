@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from './supabaseClient';
+import { fetchMyStudentIds } from './studentScope';
 
 const KIND_LABELS = {
   mate1: 'Мат в 1 ход',
@@ -18,7 +19,6 @@ const LEVELS = [
   { value: 'any', label: 'Любые' },
 ];
 
-// Диапазон строк (по сортировке рейтинга) для выбранной сложности
 const levelRange = (total, level) => {
   if (level === 'any' || total < 3) return [0, Math.max(0, total - 1)];
   const third = Math.floor(total / 3);
@@ -36,7 +36,6 @@ const shuffle = (arr) => {
   return a;
 };
 
-// Выбирает n случайных задач вида kind нужной сложности
 const pickPuzzleIds = async (kind, level, n) => {
   const { count, error: countError } = await supabase
     .from('puzzles')
@@ -80,7 +79,6 @@ export const HomeworkTeacher = () => {
   const [dueDate, setDueDate] = useState('');
   const [title, setTitle] = useState('');
 
-  // Автоматические правила (ДЗ раз в неделю)
   const [rules, setRules] = useState([]);
   const [ruleTitle, setRuleTitle] = useState('');
   const [ruleWeekday, setRuleWeekday] = useState(1);
@@ -95,12 +93,15 @@ export const HomeworkTeacher = () => {
     if (!userId) return;
     setLoading(true);
     try {
-      // Ученики — как на вкладке «Ученики»; группы тренера с их составом
-      const { data: studentRows } = await supabase
-        .from('profiles')
-        .select('id, name, email')
-        .eq('role', 'student')
-        .order('created_at', { ascending: false });
+      const myStudentIds = await fetchMyStudentIds(userId);
+
+      const { data: studentRows } = myStudentIds.length
+        ? await supabase
+            .from('profiles')
+            .select('id, name, email')
+            .in('id', myStudentIds)
+            .order('created_at', { ascending: false })
+        : { data: [] };
       const studentList = studentRows || [];
       const studentIds = studentList.map((p) => p.id);
 
@@ -203,7 +204,6 @@ export const HomeworkTeacher = () => {
     try {
       let puzzleIds = [];
       if (kind === 'mixed') {
-        // 40% мат в 1, 40% мат в 2, 20% мат в 3 — по нарастающей сложности
         const third = Math.round(count * 0.2);
         const first = Math.ceil((count - third) / 2);
         const second = count - third - first;
@@ -335,7 +335,6 @@ export const HomeworkTeacher = () => {
     }
   };
 
-  // Сводка по заданиям: решено / ошибки / подсказки по каждому ученику
   const summary = useMemo(() => {
     const map = {};
     results.forEach((r) => {

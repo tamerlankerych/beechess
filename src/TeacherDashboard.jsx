@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from './supabaseClient';
+import { fetchMyStudentIds } from './studentScope';
 import { HomeworkTeacher } from './HomeworkTeacher.jsx';
 
 export const TeacherDashboard = ({
@@ -24,7 +25,7 @@ export const TeacherDashboard = ({
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
-      <div className="flex gap-2 bg-white p-1.5 rounded-2xl border border-gray-200 shadow-sm w-fit">
+      <div className="flex gap-2 bg-white p-1.5 rounded-2xl border border-gray-200 shadow-sm w-fit flex-wrap">
         <button
           onClick={() => setActiveTab('schedule')}
           className={`px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer ${
@@ -93,22 +94,42 @@ const StudentsTab = ({ userId, onOpenRoom }) => {
 
   const fetchStudents = useCallback(async () => {
     setFetching(true);
-    const [{ data: studentsData, error: sErr }, { data: subsData }] = await Promise.all([
-      supabase
-        .from('profiles')
-        .select('*')
-        .eq('role', 'student')
-        .order('created_at', { ascending: false }),
-      supabase.from('subscriptions').select('student_id, balance'),
-    ]);
-    if (!sErr) setStudents(studentsData || []);
-    const map = {};
-    (subsData || []).forEach((s) => {
-      map[s.student_id] = s.balance;
-    });
-    setSubs(map);
-    setFetching(false);
-  }, []);
+    try {
+      const ids = await fetchMyStudentIds(userId);
+      if (ids.length === 0) {
+        setStudents([]);
+        setSubs({});
+        return;
+      }
+
+      const [{ data: studentsData, error: sErr }, { data: subsData }] =
+        await Promise.all([
+          supabase
+            .from('profiles')
+            .select('*')
+            .in('id', ids)
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('subscriptions')
+            .select('student_id, balance')
+            .in('student_id', ids),
+        ]);
+      if (sErr) throw sErr;
+
+      setStudents(studentsData || []);
+      const map = {};
+      (subsData || []).forEach((s) => {
+        map[s.student_id] = s.balance;
+      });
+      setSubs(map);
+    } catch (err) {
+      console.error('Ошибка загрузки учеников:', err);
+      setStudents([]);
+      setSubs({});
+    } finally {
+      setFetching(false);
+    }
+  }, [userId]);
 
   useEffect(() => {
     fetchStudents();
@@ -124,6 +145,15 @@ const StudentsTab = ({ userId, onOpenRoom }) => {
         target_role: 'student',
       });
       if (error) throw error;
+
+      try {
+        await supabase.rpc('attach_student_to_teacher', {
+          target_student_email: email,
+        });
+      } catch (attachErr) {
+        console.warn('attach_student_to_teacher:', attachErr);
+      }
+
       setEmail('');
       await fetchStudents();
     } catch (err) {
@@ -275,13 +305,23 @@ const GroupsTab = ({ userId, onOpenGroupRoom }) => {
   const [groupMemberIds, setGroupMemberIds] = useState([]);
 
   const fetchStudents = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('role', 'student')
-      .order('created_at', { ascending: false });
-    if (!error) setStudents(data || []);
-  }, []);
+    try {
+      const ids = await fetchMyStudentIds(userId);
+      if (ids.length === 0) {
+        setStudents([]);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .in('id', ids)
+        .order('created_at', { ascending: false });
+      if (!error) setStudents(data || []);
+    } catch (err) {
+      console.error('Ошибка загрузки учеников:', err);
+      setStudents([]);
+    }
+  }, [userId]);
 
   const fetchGroups = useCallback(async () => {
     const { data: groupsData, error } = await supabase
@@ -525,6 +565,7 @@ const GroupsTab = ({ userId, onOpenGroupRoom }) => {
     </div>
   );
 };
+
 /* ============================================================
    Вкладка: Расписание
    ============================================================ */
@@ -565,12 +606,21 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
       const fromIso = weekStart.toISOString();
       const toIso = weekEnd.toISOString();
 
+      const { data: groupsData, error: groupsErr } = await supabase
+        .from('groups')
+        .select('id, name, teacher_id')
+        .eq('teacher_id', userId)
+        .order('created_at', { ascending: false });
+      if (groupsErr) throw groupsErr;
+
+      const myGroupIds = (groupsData || []).map((g) => g.id);
+      const myStudentIds = await fetchMyStudentIds(userId);
+
       const [
         { data: lessonsData, error: lessonsErr },
-        { data: studentsData, error: studentsErr },
-        { data: groupsData, error: groupsErr },
         { data: membersData, error: membersErr },
-        { data: subsData },
+        studentsRes,
+        subsRes,
       ] = await Promise.all([
         supabase
           .from('crm_lessons')
@@ -579,30 +629,37 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
           .gte('starts_at', fromIso)
           .lt('starts_at', toIso)
           .order('starts_at', { ascending: true }),
-        supabase
-          .from('profiles')
-          .select('id, name, email, role')
-          .eq('role', 'student')
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('groups')
-          .select('id, name, teacher_id')
-          .eq('teacher_id', userId)
-          .order('created_at', { ascending: false }),
-        supabase.from('group_members').select('group_id, student_id'),
-        supabase.from('subscriptions').select('student_id, balance'),
+        myGroupIds.length
+          ? supabase
+              .from('group_members')
+              .select('group_id, student_id')
+              .in('group_id', myGroupIds)
+          : Promise.resolve({ data: [], error: null }),
+        myStudentIds.length
+          ? supabase
+              .from('profiles')
+              .select('id, name, email, role')
+              .in('id', myStudentIds)
+              .order('created_at', { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        myStudentIds.length
+          ? supabase
+              .from('subscriptions')
+              .select('student_id, balance')
+              .in('student_id', myStudentIds)
+          : Promise.resolve({ data: [], error: null }),
       ]);
 
       if (lessonsErr) throw lessonsErr;
-      if (studentsErr) throw studentsErr;
-      if (groupsErr) throw groupsErr;
       if (membersErr) throw membersErr;
+      if (studentsRes.error) throw studentsRes.error;
+      if (subsRes.error) throw subsRes.error;
 
       setLessons(lessonsData || []);
-      setStudents(studentsData || []);
+      setStudents(studentsRes.data || []);
 
       const map = {};
-      (subsData || []).forEach((s) => {
+      (subsRes.data || []).forEach((s) => {
         map[s.student_id] = s.balance;
       });
       setSubs(map);
@@ -687,11 +744,6 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
 
-  // ============================================================
-  // ФИКС: получаем АКТУАЛЬНЫХ участников урока.
-  // Для групповых — берём живых членов группы, а не снимок
-  // student_ids, чтобы новые ученики сразу попадали в урок.
-  // ============================================================
   const getLiveParticipants = (lesson) => {
     if (lesson.group_id) {
       const grp = groups.find((g) => g.id === lesson.group_id);
@@ -732,11 +784,8 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
         .eq('id', lesson.id);
       if (error) throw error;
 
-      // ФИКС: списываем с живых участников (актуальный состав группы)
       const participants = getLiveParticipants(lesson);
-      const attendees = participants.filter(
-        (sid) => attendance[sid] !== false
-      );
+      const attendees = participants.filter((sid) => attendance[sid] !== false);
 
       for (const sid of attendees) {
         await supabase.rpc('adjust_subscription', {
@@ -1030,8 +1079,9 @@ const LessonDetailsModal = ({
 
   const isPast = new Date(lesson.ends_at) < new Date();
 
-  // Живые участники урока (для группы — актуальный состав)
-  const participants = getLiveParticipants ? getLiveParticipants(lesson) : (lesson.student_ids || []);
+  const participants = getLiveParticipants
+    ? getLiveParticipants(lesson)
+    : lesson.student_ids || [];
 
   const toggleAttendance = (studentId) => {
     setAttendance((prev) => {
@@ -1215,6 +1265,7 @@ const LessonDetailsModal = ({
     </div>
   );
 };
+
 /* ============================================================
    Модалка: создание урока
    ============================================================ */
@@ -1307,7 +1358,6 @@ const LessonEditor = ({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  // Формат урока определяется РЕЖИМОМ, а не числом учеников
   const isGroupMode = attendeeMode === 'group' && !!selectedGroupId;
   const isGroup = isGroupMode || selectedStudentIds.length > 1;
   const durationMin = endHour * 60 + endMinute - (startHour * 60 + startMinute);
@@ -1472,20 +1522,14 @@ const LessonEditor = ({
           ? crypto.randomUUID()
           : null;
 
-      // ============================================================
-      // ФИКС ГРУПП:
-      // Если выбран режим «👥 Группа» — урок привязывается к
-      // group_id, даже если в ней 1 ученик. Тогда:
-      //  - is_group: true всегда
-      //  - новые члены группы автоматически попадают во все уроки
-      //  - ссылка ?room=group-<id> одна и не меняется
-      // ============================================================
       const groupMemberIds = isGroupMode
         ? groups.find((g) => g.id === selectedGroupId)?.memberIds || selectedStudentIds
         : null;
 
       const finalStudentIds = isGroupMode
-        ? (groupMemberIds && groupMemberIds.length > 0 ? groupMemberIds : selectedStudentIds)
+        ? groupMemberIds && groupMemberIds.length > 0
+          ? groupMemberIds
+          : selectedStudentIds
         : selectedStudentIds;
 
       const finalIsGroup = isGroupMode || selectedStudentIds.length > 1;
@@ -1509,16 +1553,9 @@ const LessonEditor = ({
         .select();
       if (insErr) throw insErr;
 
-      // ============================================================
-      // Создаём чистую запись в lessons для НОВЫХ уроков
-      // (существующие партии не трогаем)
-      // ============================================================
       if (inserted && inserted.length) {
         const lessonStates = inserted.map((l) => {
           const ids = l.student_ids || [];
-          // Для привязанной к группе — используем id группы
-          // Для индивидуального с одним учеником — id ученика
-          // Для остальных групповых — id crm-урока
           let lessonId;
           if (l.group_id) {
             lessonId = l.group_id;
@@ -1532,7 +1569,9 @@ const LessonEditor = ({
             id: lessonId,
             title: l.group_id
               ? 'Групповой урок'
-              : (ids.length === 1 ? 'Урок' : `Группа (${ids.length})`),
+              : ids.length === 1
+              ? 'Урок'
+              : `Группа (${ids.length})`,
             fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
             move_tree: {
               root: {
@@ -1555,12 +1594,10 @@ const LessonEditor = ({
           };
         });
 
-        // Оставляем уникальные id
         const uniqueStates = Object.values(
           Object.fromEntries(lessonStates.map((s) => [s.id, s]))
         );
 
-        // Не перезаписываем существующие записи
         const ids = uniqueStates.map((s) => s.id);
         const { data: existing } = await supabase
           .from('lessons')
@@ -1876,9 +1913,11 @@ const LessonEditor = ({
           </div>
           <div>
             <strong>Длительность:</strong>{' '}
-            {durationMin > 0
-              ? `${durationMin} минут`
-              : <span className="text-red-600">укажите корректное время</span>}
+            {durationMin > 0 ? (
+              `${durationMin} минут`
+            ) : (
+              <span className="text-red-600">укажите корректное время</span>
+            )}
           </div>
         </div>
 
