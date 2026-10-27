@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Chess } from 'chess.js';
 import { Chessboard } from 'react-chessboard';
-import { getBotMove } from './BotEngine';
 import BotAvatar from './BotAvatar';
 
 const getPieceColor = (piece) => {
@@ -28,31 +27,32 @@ export default function BotMatchModal({
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [promotionPending, setPromotionPending] = useState(null);
 
-  // ЗВУКИ ХОДОВ
   const sounds = useRef({
     move: new Audio('/sounds/Move.mp3'),
     capture: new Audio('/sounds/Capture.mp3'),
     check: new Audio('/sounds/Check.mp3'),
   });
 
-  // ФОНОВАЯ МУЗЫКА
   const bgmAudio = useRef(null);
+  const workerRef = useRef(null);
 
   useEffect(() => {
-    // Предзагрузка звуков ходов
+    workerRef.current = new Worker(new URL('./botWorker.js', import.meta.url), { type: 'module' });
+    return () => { if (workerRef.current) workerRef.current.terminate(); };
+  }, []);
+
+  useEffect(() => {
     Object.values(sounds.current).forEach((audio) => {
       audio.preload = 'auto';
       audio.load();
     });
 
-    // Создаем фоновую музыку, если она есть
     if (bot.bgm) {
       bgmAudio.current = new Audio(bot.bgm);
-      bgmAudio.current.loop = true; // Зацикливаем
-      bgmAudio.current.volume = 0.3; // Делаем потише (30%), чтобы не перебивать ходы
+      bgmAudio.current.loop = true;
+      bgmAudio.current.volume = 0.3;
     }
 
-    // Очистка при закрытии модалки
     return () => {
       if (bgmAudio.current) {
         bgmAudio.current.pause();
@@ -82,9 +82,7 @@ export default function BotMatchModal({
     }
   };
 
-  const updateSpeech = (text) => {
-    setSpeechText(text);
-  };
+  const updateSpeech = (text) => setSpeechText(text);
 
   const startGame = (choice) => {
     const color = choice === 'r' ? (Math.random() < 0.5 ? 'w' : 'b') : choice;
@@ -96,31 +94,33 @@ export default function BotMatchModal({
     setThinking(false);
     setSelectedSquare(null);
     setPromotionPending(null);
-    
     updateSpeech(bot.speech?.start || 'Погнали!');
     setPhase('playing');
 
-    // Запускаем музыку (сработает, т.к. был клик по кнопке)
     if (bgmAudio.current) {
       bgmAudio.current.currentTime = 0;
-      bgmAudio.current.play().catch(e => console.warn('Музыка заблокирована браузером:', e));
+      bgmAudio.current.play().catch(e => console.warn('Музыка заблокирована:', e));
     }
 
-    if (color === 'b') {
-      triggerBotMove(newGame);
-    }
+    if (color === 'b') triggerBotMove(newGame);
   };
 
   const triggerBotMove = (currentGame) => {
-    if (currentGame.isGameOver()) return;
+    if (currentGame.isGameOver() || !workerRef.current) return;
 
     setThinking(true);
-    setTimeout(() => {
-      try {
-        const botMove = getBotMove(currentGame.fen(), bot.elo);
-        if (!botMove) return;
+    const fen = currentGame.fen();
+    const startTime = Date.now();
 
-        const gameCopy = new Chess(currentGame.fen());
+    workerRef.current.onmessage = (event) => {
+      const { result: botMove } = event.data;
+      if (!botMove) { setThinking(false); return; }
+
+      const elapsed = Date.now() - startTime;
+      const delay = Math.max(0, 400 - elapsed);
+
+      setTimeout(() => {
+        const gameCopy = new Chess(fen);
         const result = gameCopy.move({
           from: botMove.from,
           to: botMove.to,
@@ -139,19 +139,21 @@ export default function BotMatchModal({
             updateSpeech(bot.speech?.capture || 'Ха!');
           }
         }
-      } catch (err) {
-        console.error('Ошибка хода бота:', err);
-      } finally {
         setThinking(false);
-      }
-    }, 400);
+      }, delay);
+    };
+
+    workerRef.current.postMessage({ fen, elo: bot.elo });
   };
 
   const executeMove = (from, to, promotionPiece) => {
     const gameCopy = new Chess(game.fen());
     try {
       const move = gameCopy.move({ from, to, promotion: promotionPiece });
-      if (move === null) return false;
+      if (move === null) {
+        setPromotionPending(null); // Закрываем модалку при ошибке
+        return false;
+      }
 
       playMoveSound(!!move.captured, gameCopy.isCheck());
       setGame(gameCopy);
@@ -165,6 +167,7 @@ export default function BotMatchModal({
       triggerBotMove(gameCopy);
       return true;
     } catch (e) {
+      setPromotionPending(null);
       return false;
     }
   };
@@ -178,9 +181,18 @@ export default function BotMatchModal({
       const isPromotion = piece?.type === 'p' && (targetSquare[1] === '8' || targetSquare[1] === '1');
 
       if (isPromotion) {
-        setPromotionPending({ from: sourceSquare, to: targetSquare, color: playerColor });
-        return false;
+        // ПРОВЕРКА: является ли этот ход легальным превращением?
+        const legalMoves = gameCopy.moves({ verbose: true });
+        const isValidPromotion = legalMoves.some(
+          (m) => m.from === sourceSquare && m.to === targetSquare && m.promotion
+        );
+
+        if (isValidPromotion) {
+          setPromotionPending({ from: sourceSquare, to: targetSquare, color: playerColor });
+        }
+        return false; // Возвращаем false в любом случае, чтобы фигура отскочила назад до выбора
       }
+
       return executeMove(sourceSquare, targetSquare);
     } catch (e) {
       return false;
@@ -220,14 +232,8 @@ export default function BotMatchModal({
     }
     setOutcome({ kind, text });
     setPhase('over');
-    
     updateSpeech(kind === 'win' ? bot.speech?.lose || 'Хорошая игра!' : bot.speech?.win || 'Я победил!');
-    
-    // Выключаем фоновую музыку при завершении игры
-    if (bgmAudio.current) {
-      bgmAudio.current.pause();
-    }
-
+    if (bgmAudio.current) bgmAudio.current.pause();
     onGameEnd?.({ botId: bot.id, result: kind });
   };
 
@@ -239,11 +245,8 @@ export default function BotMatchModal({
     onGameEnd?.({ botId: bot.id, result: 'loss' });
   };
 
-  // Обертка для onClose, чтобы точно остановить музыку
   const handleClose = () => {
-    if (bgmAudio.current) {
-      bgmAudio.current.pause();
-    }
+    if (bgmAudio.current) bgmAudio.current.pause();
     onClose();
   };
 
@@ -316,15 +319,22 @@ export default function BotMatchModal({
               />
 
               {promotionPending && (
-                <div className="absolute inset-0 z-50 bg-black/60 rounded-2xl flex flex-col items-center justify-center backdrop-blur-sm">
+                <div className="absolute inset-0 z-50 bg-black/60 rounded-2xl flex flex-col items-center justify-center backdrop-blur-sm p-4">
                   <p className="text-white font-bold text-lg mb-4">Выберите фигуру:</p>
-                  <div className="flex gap-3">
+                  <div className="flex gap-3 mb-6">
                     {[{ type: 'q', label: '♕' }, { type: 'r', label: '♖' }, { type: 'b', label: '♗' }, { type: 'n', label: '♘' }].map((p) => (
-                      <button key={p.type} onClick={() => executeMove(promotionPending.from, promotionPending.to, p.type)} className="w-16 h-16 bg-white rounded-xl shadow-lg text-4xl flex items-center justify-center text-slate-900 hover:bg-amber-100 hover:scale-110 transition cursor-pointer">
+                      <button key={p.type} onClick={() => executeMove(promotionPending.from, promotionPending.to, p.type)} className="w-16 h-16 bg-white rounded-xl shadow-lg text-4xl flex items-center justify-center text-slate-900 hover:bg-amber-100 active:scale-95 transition cursor-pointer">
                         {p.label}
                       </button>
                     ))}
                   </div>
+                  {/* КНОПКА ОТМЕНЫ НА СЛУЧАЙ СЛУЧАЙНОГО КЛИКА */}
+                  <button 
+                    onClick={() => setPromotionPending(null)} 
+                    className="px-5 py-2 rounded-xl bg-slate-800 text-slate-300 text-sm font-bold hover:bg-slate-700 transition cursor-pointer"
+                  >
+                    Отмена
+                  </button>
                 </div>
               )}
             </div>
