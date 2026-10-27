@@ -1,6 +1,8 @@
+// src/App.jsx
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { supabase } from './supabaseClient';
 import { LoginScreen } from './LoginScreen';
+import BotArena from './BotArena';
 
 const ChessBoardRoom = lazy(() =>
   import('./ChessBoard.jsx').then((m) => ({ default: m.ChessBoardRoom }))
@@ -18,7 +20,6 @@ const StudentDashboard = lazy(() =>
 const INITIAL_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
 const resolveLessonRoom = (crmLesson) => {
-  // Если урок привязан к группе — всегда комната группы
   if (crmLesson.group_id) {
     return { id: crmLesson.group_id, roomId: `group-${crmLesson.group_id}`, isGroup: true };
   }
@@ -118,7 +119,6 @@ export default function App() {
       if (crmLesson) {
         const isStudent = role === 'student';
         if (isStudent && !crmLesson.student_ids.includes(userId)) {
-          // Проверим, может ученик в группе
           if (crmLesson.group_id) {
             const { data: membership } = await supabase
               .from('group_members')
@@ -372,10 +372,6 @@ export default function App() {
   };
 
   const handleStartCrmLesson = async (crmLesson) => {
-    // ============================================================
-    // Если урок привязан к группе — открываем комнату группы.
-    // Все текущие и будущие члены группы попадут сюда же.
-    // ============================================================
     if (crmLesson.group_id) {
       const { data: groupRow } = await supabase
         .from('groups')
@@ -406,7 +402,6 @@ export default function App() {
       return;
     }
 
-    // Дальше — старая логика для индивидуальных и старых групповых
     const resolved = resolveLessonRoom(crmLesson);
 
     let students = null;
@@ -550,16 +545,29 @@ export default function App() {
             )}
 
             {userRole === 'student' && !activeLesson && (
-              <button
-                onClick={() => setActiveTab('student-panel')}
-                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                  activeTab === 'student-panel'
-                    ? 'bg-white text-emerald-600 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                📅 Мои уроки
-              </button>
+              <>
+                <button
+                  onClick={() => setActiveTab('student-panel')}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                    activeTab === 'student-panel'
+                      ? 'bg-white text-emerald-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  📅 Мои уроки
+                </button>
+
+                <button
+                  onClick={() => setActiveTab('bot-arena')}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                    activeTab === 'bot-arena'
+                      ? 'bg-white text-purple-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  🎮 Bot Arena
+                </button>
+              </>
             )}
 
             {activeLesson && (
@@ -649,6 +657,10 @@ export default function App() {
 
           {userRole === 'student' && activeTab === 'student-panel' && (
             <StudentDashboard onOpenLesson={handleStudentOpenLesson} />
+          )}
+
+          {userRole === 'student' && activeTab === 'bot-arena' && (
+            <BotArena currentUser={session?.user} />
           )}
 
           {(userRole === 'teacher' || userRole === 'student' || userRole === 'admin' || userRole === 'crm_admin') &&
