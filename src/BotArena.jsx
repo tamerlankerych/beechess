@@ -30,7 +30,8 @@ export default function BotArena({ currentUser, onSelectBot }) {
 
         if (error) console.warn('Прогресс ботов недоступен:', error.message);
         if (!cancelled && data?.highest_unlocked) {
-          setUnlockedLevel(Math.min(data.highest_unlocked, BOTS_CONFIG.length));
+          // ФИКС: Разрешаем сохранять 6-й уровень (когда пройдены все 5 ботов)
+          setUnlockedLevel(Math.min(data.highest_unlocked, BOTS_CONFIG.length + 1));
         }
       } catch (err) {
         console.warn('Прогресс пока не создан, ставим 1 уровень');
@@ -56,7 +57,7 @@ export default function BotArena({ currentUser, onSelectBot }) {
     const index = BOTS_CONFIG.findIndex((b) => b.id === botId);
     if (index === -1) return; 
 
-    // ВСЕГДА ставим следующего бота (чтобы кнопка появилась даже на реванше)
+    // Всегда ставим следующего бота, чтобы кнопка появилась
     if (index < BOTS_CONFIG.length - 1) {
       setLastUnlockedBot(BOTS_CONFIG[index + 1]);
     } else {
@@ -66,9 +67,9 @@ export default function BotArena({ currentUser, onSelectBot }) {
     const level = index + 1;
     const nextLevel = level + 1;
 
-    // А в БД пишем и уровень поднимаем только если это новый рубеж
     if (level >= unlockedLevel) {
-      setUnlockedLevel(Math.min(nextLevel, BOTS_CONFIG.length));
+      // ФИКС: Не обрезаем на 5, разрешаем поставить 6 (все пройдены)
+      setUnlockedLevel(Math.min(nextLevel, BOTS_CONFIG.length + 1));
 
       if (!currentUser?.id) return;
       try {
@@ -96,7 +97,8 @@ export default function BotArena({ currentUser, onSelectBot }) {
     setLastUnlockedBot(null);
   };
 
-  const defeated = Math.max(0, unlockedLevel - 1);
+  // ФИКС: Ограничиваем счетчик пятью победами, даже если unlockedLevel = 6
+  const defeated = Math.max(0, Math.min(unlockedLevel - 1, BOTS_CONFIG.length));
 
   return (
     <div className="min-h-screen bg-slate-900 text-white p-6 md:p-10 font-sans">
@@ -110,7 +112,8 @@ export default function BotArena({ currentUser, onSelectBot }) {
         </p>
         {!loading && (
           <p className="mt-3 text-sm font-bold text-indigo-300">
-            Пройдено ботов: {Math.min(defeated, BOTS_CONFIG.length)} из {BOTS_CONFIG.length}
+            {/* ФИКС: Math.min ограничивает отображение 5 из 5 */}
+            Пройдено ботов: {defeated} из {BOTS_CONFIG.length}
           </p>
         )}
       </div>
@@ -118,6 +121,7 @@ export default function BotArena({ currentUser, onSelectBot }) {
       <div className="max-w-3xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
         {BOTS_CONFIG.map((bot, index) => {
           const botLevel = index + 1;
+          // Если unlockedLevel = 6, то 5-й бот (Угвей) будет isBeaten = true (5 < 6)
           const isUnlocked = botLevel <= unlockedLevel;
           const isBeaten = botLevel < unlockedLevel;
 
