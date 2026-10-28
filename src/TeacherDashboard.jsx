@@ -1052,6 +1052,12 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
   };
 
   const deleteLesson = async (lesson) => {
+    // НОВАЯ ПРОВЕРКА: Если урок уже проведен, запрещаем удалять его напрямую
+    if (lesson.status === 'done') {
+      alert('❌ Ошибка: Этот урок уже проведён (с ученика списано занятие, тренеру начислена ЗП).\n\nЧтобы удалить урок, сначала нажмите "↩️ Отменить проведение", а затем удаляйте.');
+      return;
+    }
+
     if (lesson.recurring_group_id) {
       const deleteAll = window.confirm(
         'Это урок из постоянной серии.\n\nOK — удалить ВСЕ уроки серии.\nОтмена — удалить только этот.'
