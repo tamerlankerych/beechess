@@ -956,17 +956,30 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
     try {
       const participants = getLiveParticipants(lesson);
 
-      // ПРОВЕРКА НА ТЕСТОВОГО УЧЕНИКА
+      // 1. Проверка на тестовых учеников
       const hasTestStudent = participants.some((sid) => {
         const student = students.find((s) => s.id === sid);
         return student && /^test\d*@/i.test(student.email.trim());
       });
 
       if (hasTestStudent) {
-        alert('❌ Ошибка: В этом уроке есть тестовый ученик (email начинается на test).\nПроведение урока заблокировано, чтобы случайно не начислить зарплату.');
-        return; // Останавливаем процесс
+        alert('❌ Ошибка: В этом уроке есть тестовый ученик (email начинается на test).\nПроведение урока заблокировано.');
+        return;
       }
 
+      // 2. Проверка на нулевой или отрицательный баланс
+      const attendees = participants.filter((sid) => attendance[sid] !== false);
+      
+      for (const sid of attendees) {
+        const balance = subs[sid] ?? 0;
+        if (balance <= 0) {
+          const s = students.find((st) => st.id === sid);
+          alert(`❌ Ошибка: У ученика ${s?.name || s?.email || ''} нулевой или отрицательный баланс (${balance}).\n\nЧтобы провести урок, снимите с него галочку в списке "Кто пришёл".\n\nЕсли ученик должен оплатить позже, проведите урок без него, а затем попросите администратора добавить абонемент.`);
+          return; 
+        }
+      }
+
+      // 3. Проведение урока (если все ок)
       const { error } = await supabase
         .from('crm_lessons')
         .update({
@@ -977,8 +990,7 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
         .eq('id', lesson.id);
       if (error) throw error;
 
-      const attendees = participants.filter((sid) => attendance[sid] !== false);
-
+      // Списание занятий только с оплативших
       for (const sid of attendees) {
         await supabase.rpc('adjust_subscription', {
           p_student_id: sid,
@@ -988,6 +1000,7 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
         });
       }
 
+      // Начисление зарплаты только за оплативших
       try {
         await supabase.rpc('add_teacher_earning', {
           p_lesson_id: lesson.id,
