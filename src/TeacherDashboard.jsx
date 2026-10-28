@@ -122,7 +122,7 @@ const TeacherSalaryTab = ({ userId }) => {
       const { data, error } = await supabase
         .from('teacher_earnings')
         .select('id, amount, duration_min, student_count, is_group, lesson_date')
-        .eq('teacher_id', userId)
+        .eq('teacher_id', userId) // Тренер видит только СВОИ уроки
         .gte('lesson_date', fromIso)
         .lte('lesson_date', toIso)
         .order('lesson_date', { ascending: false });
@@ -954,6 +954,19 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
 
   const markLessonDone = async (lesson, attendance) => {
     try {
+      const participants = getLiveParticipants(lesson);
+
+      // ПРОВЕРКА НА ТЕСТОВОГО УЧЕНИКА
+      const hasTestStudent = participants.some((sid) => {
+        const student = students.find((s) => s.id === sid);
+        return student && /^test\d*@/i.test(student.email.trim());
+      });
+
+      if (hasTestStudent) {
+        alert('❌ Ошибка: В этом уроке есть тестовый ученик (email начинается на test).\nПроведение урока заблокировано, чтобы случайно не начислить зарплату.');
+        return; // Останавливаем процесс
+      }
+
       const { error } = await supabase
         .from('crm_lessons')
         .update({
@@ -964,7 +977,6 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
         .eq('id', lesson.id);
       if (error) throw error;
 
-      const participants = getLiveParticipants(lesson);
       const attendees = participants.filter((sid) => attendance[sid] !== false);
 
       for (const sid of attendees) {
@@ -1343,13 +1355,17 @@ const LessonDetailsModal = ({
                 if (!s) return null;
                 const attended = isAttended(sid);
                 const balance = subs[sid] ?? 0;
+                const isTest = /^test\d*@/i.test(s.email.trim());
+
                 return (
                   <label
                     key={sid}
                     className={`flex items-center gap-2.5 p-2 rounded-lg text-sm ${
-                      canMark ? 'cursor-pointer' : ''
+                      canMark && !isTest ? 'cursor-pointer' : ''
                     } ${
-                      attended
+                      isTest
+                        ? 'bg-red-50 border border-red-300'
+                        : attended
                         ? 'bg-emerald-50 border border-emerald-100'
                         : 'bg-red-50 border border-red-100'
                     }`}
@@ -1357,25 +1373,31 @@ const LessonDetailsModal = ({
                     <input
                       type="checkbox"
                       checked={attended}
-                      onChange={() => canMark && toggleAttendance(sid)}
-                      disabled={!canMark}
+                      onChange={() => canMark && !isTest && toggleAttendance(sid)}
+                      disabled={!canMark || isTest}
                       className="w-4 h-4"
                     />
                     <span className="font-medium text-gray-800 flex-1">
                       {s.name || s.email}
                     </span>
-                    <span
-                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                        balance < 0
-                          ? 'bg-red-100 text-red-700'
-                          : balance === 0
-                          ? 'bg-slate-100 text-slate-500'
-                          : 'bg-emerald-100 text-emerald-700'
-                      }`}
-                      title="Осталось занятий"
-                    >
-                      {balance} ост.
-                    </span>
+                    {isTest ? (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-600 text-white">
+                        ТЕСТ
+                      </span>
+                    ) : (
+                      <span
+                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                          balance < 0
+                            ? 'bg-red-100 text-red-700'
+                            : balance === 0
+                            ? 'bg-slate-100 text-slate-500'
+                            : 'bg-emerald-100 text-emerald-700'
+                        }`}
+                        title="Осталось занятий"
+                      >
+                        {balance} ост.
+                      </span>
+                    )}
                   </label>
                 );
               })}
