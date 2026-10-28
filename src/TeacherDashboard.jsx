@@ -122,7 +122,7 @@ const TeacherSalaryTab = ({ userId }) => {
       const { data, error } = await supabase
         .from('teacher_earnings')
         .select('id, amount, duration_min, student_count, is_group, lesson_date')
-        .eq('teacher_id', userId) // Тренер видит только СВОИ уроки
+        .eq('teacher_id', userId)
         .gte('lesson_date', fromIso)
         .lte('lesson_date', toIso)
         .order('lesson_date', { ascending: false });
@@ -967,9 +967,15 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
         return;
       }
 
-      // 2. Проверка на нулевой или отрицательный баланс
       const attendees = participants.filter((sid) => attendance[sid] !== false);
-      
+
+      // 2. Проверка: если никого не выбрали
+      if (attendees.length === 0) {
+        alert('❌ Ошибка: Вы никого не отметили как пришедшего.\n\nЕсли урок не состоялся, закройте это окно и нажмите кнопку "⊘ Не проведён (не списывать)".');
+        return;
+      }
+
+      // 3. Проверка на нулевой или отрицательный баланс
       for (const sid of attendees) {
         const balance = subs[sid] ?? 0;
         if (balance <= 0) {
@@ -979,7 +985,7 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
         }
       }
 
-      // 3. Проведение урока (если все ок)
+      // 4. Проведение урока (если все ок)
       const { error } = await supabase
         .from('crm_lessons')
         .update({
