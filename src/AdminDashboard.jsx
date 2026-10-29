@@ -872,7 +872,7 @@ const SalaryTab = () => {
         groupsMap = Object.fromEntries((groupsData || []).map((g) => [g.id, g.name]));
       }
 
-      // Имена учеников (для индивидуальных и для кастомных групп)
+      // Имена учеников (только для индивидуальных)
       const studentIds = [
         ...new Set(
           (lessonsData || [])
@@ -897,11 +897,9 @@ const SalaryTab = () => {
         let who = '—';
 
         if (e.is_group) {
+          // Если есть название группы, пишем его, иначе просто "Группа"
           if (lesson.group_id && groupsMap[lesson.group_id]) {
             who = `👥 ${groupsMap[lesson.group_id]}`;
-          } else if (lesson.student_ids && lesson.student_ids.length > 0) {
-            const names = lesson.student_ids.map(id => profilesMap[id]).filter(Boolean);
-            who = `👥 ${names.join(', ') || 'Группа'}`;
           } else {
             who = '👥 Группа';
           }
