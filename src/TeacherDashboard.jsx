@@ -119,16 +119,82 @@ const TeacherSalaryTab = ({ userId }) => {
       const fromIso = new Date(dateFrom + 'T00:00:00').toISOString();
       const toIso = new Date(dateTo + 'T23:59:59').toISOString();
 
-      const { data, error } = await supabase
+      // 1. Получаем базовые начисления
+      const { data: earningsData, error: earnErr } = await supabase
         .from('teacher_earnings')
-        .select('id, amount, duration_min, student_count, is_group, lesson_date')
+        .select('*')
         .eq('teacher_id', userId)
         .gte('lesson_date', fromIso)
         .lte('lesson_date', toIso)
         .order('lesson_date', { ascending: false });
 
-      if (error) throw error;
-      setEarnings(data || []);
+      if (earnErr) throw earnErr;
+      if (!earningsData || earningsData.length === 0) {
+        setEarnings([]);
+        return;
+      }
+
+      // 2. Подтягиваем данные об уроках (время, группы, ученики)
+      const lessonIds = [...new Set(earningsData.map((e) => e.lesson_id))];
+      const { data: lessonsData, error: lesErr } = await supabase
+        .from('crm_lessons')
+        .select('id, starts_at, group_id, student_ids')
+        .in('id', lessonIds);
+
+      if (lesErr) throw lesErr;
+
+      const lessonsMap = Object.fromEntries((lessonsData || []).map((l) => [l.id, l]));
+
+      // 3. Подтягиваем названия групп
+      const groupIds = [...new Set((lessonsData || []).map((l) => l.group_id).filter(Boolean))];
+      let groupsMap = {};
+      if (groupIds.length > 0) {
+        const { data: groupsData } = await supabase
+          .from('groups')
+          .select('id, name')
+          .in('id', groupIds);
+        groupsMap = Object.fromEntries((groupsData || []).map((g) => [g.id, g.name]));
+      }
+
+      // 4. Подтягиваем имена учеников (для индивидуальных)
+      const studentIds = [
+        ...new Set(
+          (lessonsData || [])
+            .filter((l) => l.student_ids && l.student_ids.length > 0)
+            .flatMap((l) => l.student_ids)
+        ),
+      ];
+      let profilesMap = {};
+      if (studentIds.length > 0) {
+        const { data: profilesData } = await supabase
+          .from('profiles')
+          .select('id, name, email')
+          .in('id', studentIds);
+        profilesMap = Object.fromEntries(
+          (profilesData || []).map((p) => [p.id, p.name || p.email])
+        );
+      }
+
+      // 5. Собираем всё вместе
+      const enrichedEarnings = earningsData.map((e) => {
+        const lesson = lessonsMap[e.lesson_id] || {};
+        let who = '—';
+
+        if (e.is_group) {
+          who = lesson.group_id ? `👥 ${groupsMap[lesson.group_id] || 'Группа'}` : '👥 Группа';
+        } else {
+          const firstStudentId = lesson.student_ids?.[0];
+          who = firstStudentId ? `👤 ${profilesMap[firstStudentId] || 'Ученик'}` : '👤 Ученик';
+        }
+
+        return {
+          ...e,
+          lesson_time: lesson.starts_at,
+          who,
+        };
+      });
+
+      setEarnings(enrichedEarnings);
     } catch (err) {
       console.error('Ошибка загрузки зарплаты:', err);
       setError(err.message);
@@ -219,40 +285,57 @@ const TeacherSalaryTab = ({ userId }) => {
               <thead>
                 <tr className="border-b border-gray-100 text-gray-400">
                   <th className="py-2.5 px-3 font-medium">Дата</th>
+                  <th className="py-2.5 px-3 font-medium">Время</th>
+                  <th className="py-2.5 px-3 font-medium">С кем</th>
                   <th className="py-2.5 px-3 font-medium text-center">Длит.</th>
-                  <th className="py-2.5 px-3 font-medium text-center">Учеников</th>
+                  <th className="py-2.5 px-3 font-medium text-center">Уч.</th>
                   <th className="py-2.5 px-3 font-medium text-center">Тип</th>
                   <th className="py-2.5 px-3 font-medium text-right">Сумма</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 text-gray-700">
-                {earnings.map((e) => (
-                  <tr key={e.id} className="hover:bg-gray-50/50">
-                    <td className="py-3 px-3 text-gray-500 font-mono text-[11px]">
-                      {new Date(e.lesson_date).toLocaleDateString('ru-RU', {
-                        day: '2-digit',
-                        month: '2-digit',
-                        year: 'numeric',
-                      })}
-                    </td>
-                    <td className="py-3 px-3 text-center font-semibold">{e.duration_min}м</td>
-                    <td className="py-3 px-3 text-center">{e.student_count}</td>
-                    <td className="py-3 px-3 text-center text-[10px]">
-                      <span
-                        className={`px-2 py-0.5 rounded-full font-bold uppercase ${
-                          e.is_group
-                            ? 'bg-blue-50 text-blue-700'
-                            : 'bg-slate-100 text-slate-600'
-                        }`}
-                      >
-                        {e.is_group ? 'Группа' : 'Индив.'}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 text-right font-bold text-emerald-700">
-                      {e.amount.toLocaleString('ru-RU')} ₸
-                    </td>
-                  </tr>
-                ))}
+                {earnings.map((e) => {
+                  const timeString = e.lesson_time
+                    ? new Date(e.lesson_time).toLocaleTimeString('ru-RU', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : '—';
+
+                  return (
+                    <tr key={e.id} className="hover:bg-gray-50/50">
+                      <td className="py-3 px-3 text-gray-500 font-mono text-[11px]">
+                        {new Date(e.lesson_date).toLocaleDateString('ru-RU', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                        })}
+                      </td>
+                      <td className="py-3 px-3 text-gray-600 font-mono text-[11px] font-semibold">
+                        {timeString}
+                      </td>
+                      <td className="py-3 px-3 font-medium text-gray-900 truncate max-w-[180px]" title={e.who}>
+                        {e.who}
+                      </td>
+                      <td className="py-3 px-3 text-center font-semibold">{e.duration_min}м</td>
+                      <td className="py-3 px-3 text-center">{e.student_count}</td>
+                      <td className="py-3 px-3 text-center text-[10px]">
+                        <span
+                          className={`px-2 py-0.5 rounded-full font-bold uppercase ${
+                            e.is_group
+                              ? 'bg-blue-50 text-blue-700'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {e.is_group ? 'Группа' : 'Индив.'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-right font-bold text-emerald-700">
+                        {e.amount.toLocaleString('ru-RU')} ₸
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
