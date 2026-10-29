@@ -758,6 +758,7 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
   const [fetching, setFetching] = useState(true);
   const [creatingAt, setCreatingAt] = useState(null);
   const [detailsLesson, setDetailsLesson] = useState(null);
+  const [deletingLesson, setDeletingLesson] = useState(null);
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
@@ -956,7 +957,6 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
     try {
       const participants = getLiveParticipants(lesson);
 
-      // 1. Проверка на тестовых учеников
       const hasTestStudent = participants.some((sid) => {
         const student = students.find((s) => s.id === sid);
         return student && /^test\d*@/i.test(student.email.trim());
@@ -969,13 +969,11 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
 
       const attendees = participants.filter((sid) => attendance[sid] !== false);
 
-      // 2. Проверка: если никого не выбрали
       if (attendees.length === 0) {
         alert('❌ Ошибка: Вы никого не отметили как пришедшего.\n\nЕсли урок не состоялся, закройте это окно и нажмите кнопку "⊘ Не проведён (не списывать)".');
         return;
       }
 
-      // 3. Проверка на нулевой или отрицательный баланс
       for (const sid of attendees) {
         const balance = subs[sid] ?? 0;
         if (balance <= 0) {
@@ -985,7 +983,6 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
         }
       }
 
-      // 4. Проведение урока (если все ок)
       const { error } = await supabase
         .from('crm_lessons')
         .update({
@@ -996,7 +993,6 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
         .eq('id', lesson.id);
       if (error) throw error;
 
-      // Списание занятий только с оплативших
       for (const sid of attendees) {
         await supabase.rpc('adjust_subscription', {
           p_student_id: sid,
@@ -1006,7 +1002,6 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
         });
       }
 
-      // Начисление зарплаты только за оплативших
       try {
         await supabase.rpc('add_teacher_earning', {
           p_lesson_id: lesson.id,
@@ -1051,43 +1046,34 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
     }
   };
 
-  const deleteLesson = async (lesson) => {
-    // НОВАЯ ПРОВЕРКА: Если урок уже проведен, запрещаем удалять его напрямую
-    if (lesson.status === 'done') {
-      alert('❌ Ошибка: Этот урок уже проведён (с ученика списано занятие, тренеру начислена ЗП).\n\nЧтобы удалить урок, сначала нажмите "↩️ Отменить проведение", а затем удаляйте.');
-      return;
-    }
+  const executeDelete = async (lesson, mode) => {
+    setDeletingLesson(null);
 
-    if (lesson.recurring_group_id) {
-      const deleteAll = window.confirm(
-        'Это урок из постоянной серии.\n\nOK — удалить ВСЕ уроки серии.\nОтмена — удалить только этот.'
+    let targetLessons = [];
+    if (mode === 'single') {
+      targetLessons = [lesson];
+    } else if (mode === 'future') {
+      targetLessons = lessons.filter(
+        (l) => l.recurring_group_id === lesson.recurring_group_id && new Date(l.starts_at) >= new Date(lesson.starts_at)
       );
-      try {
-        if (deleteAll) {
-          const { error } = await supabase
-            .from('crm_lessons')
-            .delete()
-            .eq('recurring_group_id', lesson.recurring_group_id);
-          if (error) throw error;
-        } else {
-          const { error } = await supabase
-            .from('crm_lessons')
-            .delete()
-            .eq('id', lesson.id);
-          if (error) throw error;
-        }
-        setDetailsLesson(null);
-        await fetchAll();
-      } catch (err) {
-        alert('Ошибка удаления: ' + err.message);
-      }
+    }
+
+    const hasDone = targetLessons.some((l) => l.status === 'done');
+    if (hasDone) {
+      alert('❌ Ошибка: Среди выбранных уроков есть уже проведённые (с них списаны занятия и начислена ЗП).\n\nЧтобы удалить их, сначала отмените проведение.');
       return;
     }
 
-    if (!window.confirm('Удалить урок? Действие необратимо.')) return;
     try {
-      const { error } = await supabase.from('crm_lessons').delete().eq('id', lesson.id);
-      if (error) throw error;
+      if (mode === 'single') {
+        await supabase.from('crm_lessons').delete().eq('id', lesson.id);
+      } else if (mode === 'future') {
+        await supabase.from('crm_lessons')
+          .delete()
+          .eq('recurring_group_id', lesson.recurring_group_id)
+          .gte('starts_at', lesson.starts_at);
+      }
+      
       setDetailsLesson(null);
       await fetchAll();
     } catch (err) {
@@ -1233,7 +1219,7 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
           formatTime={formatTime}
           canStart={canStartLesson(detailsLesson)}
           onClose={() => setDetailsLesson(null)}
-          onDelete={() => deleteLesson(detailsLesson)}
+          onDelete={() => setDeletingLesson(detailsLesson)}
           onStart={() => {
             onStartCrmRoom?.(detailsLesson);
           }}
@@ -1262,6 +1248,52 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
             }
           }}
         />
+      )}
+
+      {deletingLesson && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4">
+          <div className="w-full max-w-sm bg-white rounded-2xl border border-gray-200 shadow-2xl p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Удаление урока</h3>
+            <p className="text-sm text-gray-500 mb-5">
+              {deletingLesson.recurring_group_id
+                ? 'Этот урок является частью постоянной серии. Что именно вы хотите удалить?'
+                : 'Вы уверены, что хотите удалить этот урок?'}
+            </p>
+            
+            <div className="space-y-2">
+              {deletingLesson.recurring_group_id ? (
+                <>
+                  <button
+                    onClick={() => executeDelete(deletingLesson, 'single')}
+                    className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm transition cursor-pointer"
+                  >
+                    Только этот урок
+                  </button>
+                  <button
+                    onClick={() => executeDelete(deletingLesson, 'future')}
+                    className="w-full py-2.5 bg-amber-100 hover:bg-amber-200 text-amber-800 font-semibold rounded-xl text-sm transition cursor-pointer"
+                  >
+                    Этот и будущие уроки
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => executeDelete(deletingLesson, 'single')}
+                  className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-sm transition cursor-pointer"
+                >
+                  Удалить урок
+                </button>
+              )}
+              
+              <button
+                onClick={() => setDeletingLesson(null)}
+                className="w-full py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 font-semibold rounded-xl text-sm transition cursor-pointer mt-2"
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
