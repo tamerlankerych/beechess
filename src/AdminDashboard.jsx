@@ -1,3 +1,4 @@
+// src/AdminDashboard.jsx
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from './supabaseClient';
 
@@ -791,7 +792,7 @@ const SubscriptionsTab = () => {
 };
 
 /* ============================================================
-   Вкладка 3: Зарплата тренеров
+   Вкладка 3: Зарплата тренеров (ОБНОВЛЕНА)
    ============================================================ */
 const SalaryTab = () => {
   const today = new Date();
@@ -841,9 +842,75 @@ const SalaryTab = () => {
         query = query.eq('teacher_id', teacherFilter);
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
-      setEarnings(data || []);
+      const { data: earningsData, error: earnErr } = await query;
+      if (earnErr) throw earnErr;
+
+      if (!earningsData || earningsData.length === 0) {
+        setEarnings([]);
+        return;
+      }
+
+      // Подтягиваем данные об уроках (время, группы, ученики)
+      const lessonIds = [...new Set(earningsData.map((e) => e.lesson_id))];
+      const { data: lessonsData, error: lesErr } = await supabase
+        .from('crm_lessons')
+        .select('id, starts_at, group_id, student_ids')
+        .in('id', lessonIds);
+
+      if (lesErr) throw lesErr;
+
+      const lessonsMap = Object.fromEntries((lessonsData || []).map((l) => [l.id, l]));
+
+      // Названия групп
+      const groupIds = [...new Set((lessonsData || []).map((l) => l.group_id).filter(Boolean))];
+      let groupsMap = {};
+      if (groupIds.length > 0) {
+        const { data: groupsData } = await supabase
+          .from('groups')
+          .select('id, name')
+          .in('id', groupIds);
+        groupsMap = Object.fromEntries((groupsData || []).map((g) => [g.id, g.name]));
+      }
+
+      // Имена учеников
+      const studentIds = [
+        ...new Set(
+          (lessonsData || [])
+            .filter((l) => l.student_ids && l.student_ids.length > 0)
+            .flatMap((l) => l.student_ids)
+        ),
+      ];
+      let profilesMap = {};
+      if (studentIds.length > 0) {
+        const { data: profilesData } = await supabase
+          .from('profiles')
+          .select('id, name, email')
+          .in('id', studentIds);
+        profilesMap = Object.fromEntries(
+          (profilesData || []).map((p) => [p.id, p.name || p.email])
+        );
+      }
+
+      // Собираем всё вместе
+      const enrichedEarnings = earningsData.map((e) => {
+        const lesson = lessonsMap[e.lesson_id] || {};
+        let who = '—';
+
+        if (e.is_group) {
+          who = lesson.group_id ? `👥 ${groupsMap[lesson.group_id] || 'Группа'}` : '👥 Группа';
+        } else {
+          const firstStudentId = lesson.student_ids?.[0];
+          who = firstStudentId ? `👤 ${profilesMap[firstStudentId] || 'Ученик'}` : '👤 Ученик';
+        }
+
+        return {
+          ...e,
+          lesson_time: lesson.starts_at,
+          who,
+        };
+      });
+
+      setEarnings(enrichedEarnings);
     } catch (err) {
       console.error('Ошибка загрузки зарплаты:', err);
       setError(err.message);
@@ -1026,9 +1093,11 @@ const SalaryTab = () => {
               <thead>
                 <tr className="border-b border-gray-100 text-gray-400">
                   <th className="py-2.5 px-3 font-medium">Дата</th>
+                  <th className="py-2.5 px-3 font-medium">Время</th>
                   <th className="py-2.5 px-3 font-medium">Тренер</th>
+                  <th className="py-2.5 px-3 font-medium">С кем</th>
                   <th className="py-2.5 px-3 font-medium text-center">Длит.</th>
-                  <th className="py-2.5 px-3 font-medium text-center">Учеников</th>
+                  <th className="py-2.5 px-3 font-medium text-center">Уч.</th>
                   <th className="py-2.5 px-3 font-medium text-center">Тип</th>
                   <th className="py-2.5 px-3 font-medium text-right">Сумма</th>
                 </tr>
@@ -1036,6 +1105,13 @@ const SalaryTab = () => {
               <tbody className="divide-y divide-gray-50 text-gray-700">
                 {earnings.map((e) => {
                   const t = teacherMap[e.teacher_id];
+                  const timeString = e.lesson_time
+                    ? new Date(e.lesson_time).toLocaleTimeString('ru-RU', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : '—';
+
                   return (
                     <tr key={e.id} className="hover:bg-gray-50/50">
                       <td className="py-3 px-3 text-gray-500 font-mono text-[11px]">
@@ -1045,8 +1121,14 @@ const SalaryTab = () => {
                           year: 'numeric',
                         })}
                       </td>
-                      <td className="py-3 px-3 font-medium text-gray-900">
+                      <td className="py-3 px-3 text-gray-600 font-mono text-[11px] font-semibold">
+                        {timeString}
+                      </td>
+                      <td className="py-3 px-3 font-medium text-gray-900 truncate max-w-[120px]" title={t?.name || t?.email}>
                         {t?.name || t?.email || '—'}
+                      </td>
+                      <td className="py-3 px-3 font-medium text-gray-900 truncate max-w-[150px]" title={e.who}>
+                        {e.who}
                       </td>
                       <td className="py-3 px-3 text-center">{e.duration_min}м</td>
                       <td className="py-3 px-3 text-center">{e.student_count}</td>
