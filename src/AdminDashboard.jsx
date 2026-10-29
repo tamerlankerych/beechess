@@ -850,7 +850,7 @@ const SalaryTab = () => {
         return;
       }
 
-      // Подтягиваем данные об уроках (время, группы, ученики)
+      // Подтягиваем данные об уроках
       const lessonIds = [...new Set(earningsData.map((e) => e.lesson_id))];
       const { data: lessonsData, error: lesErr } = await supabase
         .from('crm_lessons')
@@ -872,7 +872,7 @@ const SalaryTab = () => {
         groupsMap = Object.fromEntries((groupsData || []).map((g) => [g.id, g.name]));
       }
 
-      // Имена учеников
+      // Имена учеников (для индивидуальных и для кастомных групп)
       const studentIds = [
         ...new Set(
           (lessonsData || [])
@@ -897,7 +897,14 @@ const SalaryTab = () => {
         let who = '—';
 
         if (e.is_group) {
-          who = lesson.group_id ? `👥 ${groupsMap[lesson.group_id] || 'Группа'}` : '👥 Группа';
+          if (lesson.group_id && groupsMap[lesson.group_id]) {
+            who = `👥 ${groupsMap[lesson.group_id]}`;
+          } else if (lesson.student_ids && lesson.student_ids.length > 0) {
+            const names = lesson.student_ids.map(id => profilesMap[id]).filter(Boolean);
+            who = `👥 ${names.join(', ') || 'Группа'}`;
+          } else {
+            who = '👥 Группа';
+          }
         } else {
           const firstStudentId = lesson.student_ids?.[0];
           who = firstStudentId ? `👤 ${profilesMap[firstStudentId] || 'Ученик'}` : '👤 Ученик';
