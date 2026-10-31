@@ -1680,8 +1680,6 @@ const LessonEditor = ({
     return d;
   })();
 
-  const baseEnd = new Date(baseDate.getTime() + 45 * 60000);
-
   const [recurringMode, setRecurringMode] = useState('once');
   const [attendeeMode, setAttendeeMode] = useState('individual');
 
@@ -1691,8 +1689,9 @@ const LessonEditor = ({
   const [startDate, setStartDate] = useState(dateToInputValue(baseDate));
   const [startHour, setStartHour] = useState(baseDate.getHours());
   const [startMinute, setStartMinute] = useState(0);
-  const [endHour, setEndHour] = useState(baseEnd.getHours());
-  const [endMinute, setEndMinute] = useState(baseEnd.getMinutes());
+  
+  // НОВОЕ: вместо endHour/endMinute храним длительность
+  const [durationMin, setDurationMin] = useState(45); 
 
   const [recurringDays, setRecurringDays] = useState([]);
   const [recurringWeeks, setRecurringWeeks] = useState(8);
@@ -1702,7 +1701,34 @@ const LessonEditor = ({
 
   const isGroupMode = attendeeMode === 'group' && !!selectedGroupId;
   const isGroup = isGroupMode || selectedStudentIds.length > 1;
-  const durationMin = endHour * 60 + endMinute - (startHour * 60 + startMinute);
+
+  // Вычисляем время окончания для отображения
+  const totalEndMins = startHour * 60 + startMinute + durationMin;
+  const calcEndHour = Math.floor(totalEndMins / 60) % 24;
+  const calcEndMinute = totalEndMins % 60;
+
+  // ЛОГИКА АВТОМАТИЧЕСКОЙ ДЛИТЕЛЬНОСТИ
+  useEffect(() => {
+    if (attendeeMode === 'individual') {
+      // Для инд. можно выбрать 30 или 45 (оставляем текущее значение)
+    } else if (attendeeMode === 'group' && selectedGroupId) {
+      const grp = groups.find((g) => g.id === selectedGroupId);
+      const memberCount = grp?.memberIds?.length || 0;
+      
+      if (memberCount === 1) {
+        setDurationMin(30); // В группе 1 чел -> 30 минут
+      } else {
+        setDurationMin(45); // В группе 2+ чел -> 45 минут
+      }
+    } else if (attendeeMode === 'custom') {
+      // Если свой состав и выбрано 1 человек -> 30, если больше -> 45
+      if (selectedStudentIds.length <= 1) {
+        setDurationMin(30);
+      } else {
+        setDurationMin(45);
+      }
+    }
+  }, [attendeeMode, selectedGroupId, groups, selectedStudentIds.length]);
 
   useEffect(() => {
     if (recurringMode === 'weekly' && recurringDays.length === 0 && startDate) {
@@ -1832,7 +1858,7 @@ const LessonEditor = ({
       return;
     }
     if (durationMin <= 0) {
-      setError('Окончание должно быть позже начала');
+      setError('Укажите корректную длительность');
       return;
     }
     if (recurringMode === 'weekly' && recurringDays.length === 0) {
@@ -2222,26 +2248,50 @@ const LessonEditor = ({
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <TimePicker
-            label="Начало"
-            hour={startHour}
-            minute={startMinute}
-            onChange={(h, m) => {
-              setStartHour(h);
-              setStartMinute(m);
-            }}
-          />
-          <TimePicker
-            label="Окончание"
-            hour={endHour}
-            minute={endMinute}
-            onChange={(h, m) => {
-              setEndHour(h);
-              setEndMinute(m);
-            }}
-          />
+        {/* БЛОК ВРЕМЕНИ И ДЛИТЕЛЬНОСТИ */}
+        <div className="grid grid-cols-2 gap-3 mb-4 items-start">
+          <div>
+            <TimePicker
+              label="Начало"
+              hour={startHour}
+              minute={startMinute}
+              onChange={(h, m) => {
+                setStartHour(h);
+                setStartMinute(m);
+              }}
+            />
+          </div>
+          <div>
+             <label className="block text-xs font-bold text-gray-700 mb-1.5">Окончание</label>
+             <div className="w-full px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-lg text-sm font-semibold text-slate-700">
+                {pad2(calcEndHour)}:{pad2(calcEndMinute)}
+             </div>
+          </div>
         </div>
+
+        {attendeeMode === 'individual' ? (
+          <div className="mb-4">
+             <label className="block text-xs font-bold text-gray-700 mb-1.5">Длительность урока</label>
+             <div className="flex gap-2">
+                <button
+                   onClick={() => setDurationMin(30)}
+                   className={`flex-1 py-2 rounded-lg text-sm font-bold border transition ${durationMin === 30 ? 'bg-blue-50 border-blue-600 text-blue-700' : 'bg-white border-slate-200 text-gray-600 hover:bg-slate-50'}`}
+                >
+                   30 минут
+                </button>
+                <button
+                   onClick={() => setDurationMin(45)}
+                   className={`flex-1 py-2 rounded-lg text-sm font-bold border transition ${durationMin === 45 ? 'bg-blue-50 border-blue-600 text-blue-700' : 'bg-white border-slate-200 text-gray-600 hover:bg-slate-50'}`}
+                >
+                   45 минут
+                </button>
+             </div>
+          </div>
+        ) : (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700 font-medium">
+             Длительность автоматически зафиксирована: <strong>{durationMin} минут</strong> (исходя из количества учеников).
+          </div>
+        )}
 
         <div className="mb-5 text-xs text-gray-500 bg-slate-50 rounded-lg p-3 space-y-1">
           <div>
@@ -2251,14 +2301,6 @@ const LessonEditor = ({
             <strong>Формат:</strong> {isGroup ? 'Групповой' : 'Индивидуальный'}
             {isGroupMode && (
               <span className="text-emerald-600 ml-1">(привязан к группе)</span>
-            )}
-          </div>
-          <div>
-            <strong>Длительность:</strong>{' '}
-            {durationMin > 0 ? (
-              `${durationMin} минут`
-            ) : (
-              <span className="text-red-600">укажите корректное время</span>
             )}
           </div>
         </div>
