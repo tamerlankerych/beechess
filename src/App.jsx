@@ -63,16 +63,6 @@ const clearRoleCache = () => {
   }
 };
 
-// Заглушка для будущих разделов
-const ComingSoon = ({ title, desc }) => (
-  <div className="flex flex-col items-center justify-center h-full text-center p-6 text-gray-400">
-    <div className="text-6xl mb-4">🚧</div>
-    <h2 className="text-2xl font-bold text-white mb-2">{title}</h2>
-    <p className="max-w-md">{desc}</p>
-    <p className="mt-6 text-sm text-amber-500">Скоро здесь появится что-то крутое!</p>
-  </div>
-);
-
 export default function App() {
   const [session, setSession] = useState(null);
   const initializedUserIdRef = useRef(null);
@@ -541,33 +531,6 @@ export default function App() {
             >
               <span className="text-xl">🎮</span> Bot Arena
             </button>
-
-            <button
-              onClick={() => setActiveTab('courses')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-semibold text-sm transition-colors ${
-                activeTab === 'courses' ? 'bg-[#3d3b38] text-white' : 'text-gray-300 hover:bg-[#3d3b38] hover:text-white'
-              }`}
-            >
-              <span className="text-xl">📚</span> Обучение
-            </button>
-
-            <button
-              onClick={() => setActiveTab('tournaments')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-semibold text-sm transition-colors ${
-                activeTab === 'tournaments' ? 'bg-[#3d3b38] text-white' : 'text-gray-300 hover:bg-[#3d3b38] hover:text-white'
-              }`}
-            >
-              <span className="text-xl">🏆</span> Турниры
-            </button>
-            
-            <button
-              onClick={() => setActiveTab('profile')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-semibold text-sm transition-colors ${
-                activeTab === 'profile' ? 'bg-[#3d3b38] text-white' : 'text-gray-300 hover:bg-[#3d3b38] hover:text-white'
-              }`}
-            >
-              <span className="text-xl">⚙️</span> Профиль
-            </button>
           </nav>
 
           <div className="px-3 pb-2">
@@ -611,72 +574,45 @@ export default function App() {
           </button>
         </header>
 
-        {/* ОСНОВНОЙ КОНТЕНТ (с большим отступом снизу) */}
-        <main className="flex-1 overflow-y-auto pb-32 md:pb-0 flex justify-center">
+        {/* ОСНОВНОЙ КОНТЕНТ */}
+        <main className="flex-1 overflow-y-auto flex justify-center">
           <Suspense fallback={<div className="p-10 text-center text-gray-400">Загрузка...</div>}>
             {activeTab === 'student-panel' && (
-              <div className="w-full max-w-4xl p-4 md:p-8">
+              <div className="w-full max-w-4xl p-4 md:p-8 pb-24 md:pb-8">
                 <StudentDashboard onOpenLesson={handleStudentOpenLesson} />
               </div>
             )}
             {activeTab === 'bot-arena' && (
               <BotArena currentUser={session?.user} />
             )}
-            
-            {/* Заглушки для новых разделов */}
-            {activeTab === 'courses' && (
-              <ComingSoon title="Видеокурсы" desc="Здесь будут появляться видеоуроки и интерактивные задания для самостоятельного обучения." />
-            )}
-            {activeTab === 'tournaments' && (
-              <ComingSoon title="Турниры" desc="Здесь можно будет записываться на внутренние турниры академии и следить за своим рейтингом." />
-            )}
-            {activeTab === 'profile' && (
-              <ComingSoon title="Профиль" desc="Здесь можно будет сменить пароль и настроить свой аккаунт." />
-            )}
           </Suspense>
         </main>
 
-        {/* МОБИЛЬНОЕ НИЖНЕЕ МЕНЮ (с учетом Safe Area для iPhone) */}
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-[#262421] border-t border-[#3d3b38] flex justify-around items-center z-50 shadow-[0_-4px_10px_rgba(0,0,0,0.3)] pb-[env(safe-area-inset-bottom)] h-16">
-          <button
-            onClick={() => setActiveTab('student-panel')}
-            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${
-              activeTab === 'student-panel' ? 'text-amber-400' : 'text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            <span className="text-xl">📅</span>
-            <span className="text-[10px] font-bold">Расписание</span>
-          </button>
-          
-          <button
-            onClick={() => setActiveTab('bot-arena')}
-            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${
-              activeTab === 'bot-arena' ? 'text-amber-400' : 'text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            <span className="text-xl">🎮</span>
-            <span className="text-[10px] font-bold">Арена</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('courses')}
-            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${
-              activeTab === 'courses' ? 'text-amber-400' : 'text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            <span className="text-xl">📚</span>
-            <span className="text-[10px] font-bold">Обучение</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('profile')}
-            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${
-              activeTab === 'profile' ? 'text-amber-400' : 'text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            <span className="text-xl">⚙️</span>
-            <span className="text-[10px] font-bold">Профиль</span>
-          </button>
+        {/* МОБИЛЬНОЕ НИЖНЕЕ МЕНЮ */}
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#262421] border-t border-[#3d3b38] shadow-[0_-4px_10px_rgba(0,0,0,0.3)]">
+          <div className="flex justify-around items-center h-16">
+            <button
+              onClick={() => setActiveTab('student-panel')}
+              className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${
+                activeTab === 'student-panel' ? 'text-amber-400' : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              <span className="text-2xl">📅</span>
+              <span className="text-[10px] font-bold">Расписание</span>
+            </button>
+            
+            <button
+              onClick={() => setActiveTab('bot-arena')}
+              className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${
+                activeTab === 'bot-arena' ? 'text-amber-400' : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              <span className="text-2xl">🎮</span>
+              <span className="text-[10px] font-bold">Арена</span>
+            </button>
+          </div>
+          {/* Отступ для полоски iPhone */}
+          <div className="pb-[env(safe-area-inset-bottom)] bg-[#262421]" />
         </nav>
       </div>
     );
