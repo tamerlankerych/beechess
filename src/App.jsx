@@ -23,7 +23,6 @@ const resolveLessonRoom = (crmLesson) => {
   if (crmLesson.group_id) {
     return { id: crmLesson.group_id, roomId: `group-${crmLesson.group_id}`, isGroup: true };
   }
-
   const ids = crmLesson.student_ids || [];
   const isIndividual = ids.length === 1;
   if (isIndividual) {
@@ -498,6 +497,122 @@ export default function App() {
 
   if (!session) return <LoginScreen />;
 
+  // ==========================================
+  // НОВЫЙ ИНТЕРФЕЙС ДЛЯ УЧЕНИКА (Chess.com Style, Адаптивный)
+  // ==========================================
+  if (userRole === 'student' && !activeLesson) {
+    return (
+      <div className="flex flex-col md:flex-row h-screen bg-[#312e2b] text-white font-sans overflow-hidden">
+        
+        {/* БОКОВАЯ ПАНЕЛЬ (Только для ПК) */}
+        <aside className="hidden md:flex w-[240px] bg-[#262421] flex-col h-full border-r border-[#3d3b38] shrink-0">
+          <div className="p-4 flex items-center gap-2 cursor-pointer" onClick={() => setActiveTab('student-panel')}>
+            <span className="text-3xl">🐝</span>
+            <span className="text-2xl font-black tracking-tight text-white">
+              bee<span className="text-amber-500">chess</span>
+            </span>
+          </div>
+
+          <nav className="flex-1 px-3 space-y-1 mt-4">
+            <button
+              onClick={() => setActiveTab('student-panel')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-semibold text-sm transition-colors ${
+                activeTab === 'student-panel'
+                  ? 'bg-[#3d3b38] text-white'
+                  : 'text-gray-300 hover:bg-[#3d3b38] hover:text-white'
+              }`}
+            >
+              <span className="text-xl">📅</span> Расписание
+            </button>
+            <button
+              onClick={() => setActiveTab('bot-arena')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-semibold text-sm transition-colors ${
+                activeTab === 'bot-arena'
+                  ? 'bg-[#3d3b38] text-white'
+                  : 'text-gray-300 hover:bg-[#3d3b38] hover:text-white'
+              }`}
+            >
+              <span className="text-xl">🎮</span> Bot Arena
+            </button>
+          </nav>
+
+          <div className="p-3 border-t border-[#3d3b38]">
+            <div className="flex items-center gap-3 px-2 py-2 mb-2">
+              <div className="w-10 h-10 rounded-lg bg-emerald-600 flex items-center justify-center font-bold text-lg">
+                {session.user.email?.[0].toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-bold text-white truncate">{session.user.email}</div>
+                <div className="text-[10px] text-gray-400 uppercase">Ученик</div>
+              </div>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="w-full py-2 bg-[#3d3b38] hover:bg-red-500/20 text-gray-300 hover:text-red-400 rounded-lg text-xs font-bold transition-colors"
+            >
+              Выйти
+            </button>
+          </div>
+        </aside>
+
+        {/* МОБИЛЬНАЯ ШАПКА */}
+        <header className="md:hidden flex items-center justify-between p-4 bg-[#262421] border-b border-[#3d3b38] shrink-0 z-50">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">🐝</span>
+            <span className="text-xl font-black tracking-tight text-white">
+              bee<span className="text-amber-500">chess</span>
+            </span>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="text-xs px-3 py-1.5 rounded-lg border border-[#3d3b38] bg-[#312e2b] text-gray-300 font-bold"
+          >
+            Выйти
+          </button>
+        </header>
+
+        {/* ОСНОВНОЙ КОНТЕНТ */}
+        <main className="flex-1 overflow-y-auto pb-16 md:pb-0 flex justify-center">
+          <Suspense fallback={<div className="p-10 text-center text-gray-400">Загрузка...</div>}>
+            {activeTab === 'student-panel' && (
+              <div className="w-full max-w-4xl p-4 md:p-8">
+                <StudentDashboard onOpenLesson={handleStudentOpenLesson} />
+              </div>
+            )}
+            {activeTab === 'bot-arena' && (
+              <BotArena currentUser={session?.user} />
+            )}
+          </Suspense>
+        </main>
+
+        {/* МОБИЛЬНОЕ НИЖНЕЕ МЕНЮ */}
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-[#262421] border-t border-[#3d3b38] flex justify-around items-center z-50 shadow-[0_-4px_10px_rgba(0,0,0,0.3)]">
+          <button
+            onClick={() => setActiveTab('student-panel')}
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${
+              activeTab === 'student-panel' ? 'text-amber-400' : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <span className="text-xl">📅</span>
+            <span className="text-[10px] font-bold">Расписание</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('bot-arena')}
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${
+              activeTab === 'bot-arena' ? 'text-amber-400' : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <span className="text-xl">🎮</span>
+            <span className="text-[10px] font-bold">Арена</span>
+          </button>
+        </nav>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // СТАРЫЙ ИНТЕРФЕЙС (Для тренеров, админов и тех, кто в уроке)
+  // ==========================================
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800">
       <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
@@ -542,32 +657,6 @@ export default function App() {
               >
                 🎓 Кабинет тренера
               </button>
-            )}
-
-            {userRole === 'student' && !activeLesson && (
-              <>
-                <button
-                  onClick={() => setActiveTab('student-panel')}
-                  className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                    activeTab === 'student-panel'
-                      ? 'bg-white text-emerald-600 shadow-sm'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  📅 Мои уроки
-                </button>
-
-                <button
-                  onClick={() => setActiveTab('bot-arena')}
-                  className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                    activeTab === 'bot-arena'
-                      ? 'bg-white text-purple-600 shadow-sm'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  🎮 Bot Arena
-                </button>
-              </>
             )}
 
             {activeLesson && (
@@ -653,14 +742,6 @@ export default function App() {
               onOpenGroupRoom={handleOpenGroupRoom}
               onStartCrmRoom={handleStartCrmLesson}
             />
-          )}
-
-          {userRole === 'student' && activeTab === 'student-panel' && (
-            <StudentDashboard onOpenLesson={handleStudentOpenLesson} />
-          )}
-
-          {userRole === 'student' && activeTab === 'bot-arena' && (
-            <BotArena currentUser={session?.user} />
           )}
 
           {(userRole === 'teacher' || userRole === 'student' || userRole === 'admin' || userRole === 'crm_admin') &&
