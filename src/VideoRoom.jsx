@@ -1,17 +1,35 @@
-import { memo, useCallback, useMemo } from 'react';
+// src/VideoRoom.jsx
+import { memo, useCallback, useMemo, useState, useEffect } from 'react';
 import { JitsiMeeting } from '@jitsi/react-sdk';
+import { supabase } from './supabaseClient';
 
 export const VideoRoom = memo(function VideoRoom({ lesson, isObserver = false, isTeacher = false, user = {} }) {
-  if (!lesson?.id) {
-    return (
-      <div className="w-full h-full flex items-center justify-center bg-gray-900 text-gray-300 text-xs">
-        Урок не найден
-      </div>
-    );
-  }
+  const [jwt, setJwt] = useState(null);
+  const [error, setError] = useState(null);
 
-  // Название комнаты на вашем сервере
-  const roomName = `chess-lesson-${lesson.id}`;
+  const roomName = lesson?.id ? `chess-lesson-${lesson.id}` : null;
+
+  useEffect(() => {
+    if (!roomName) return;
+    let isMounted = true;
+    
+    async function fetchToken() {
+      try {
+        // Запрашиваем токен у нашей Edge-функции
+        const { data, error } = await supabase.functions.invoke('jitsi-token', {
+          body: { roomName },
+        });
+        if (error) throw error;
+        if (isMounted) setJwt(data.jwt);
+      } catch (err) {
+        console.error('Ошибка получения токена Jitsi:', err);
+        if (isMounted) setError(err.message);
+      }
+    }
+    
+    fetchToken();
+    return () => { isMounted = false; };
+  }, [roomName]);
 
   const configOverwrite = useMemo(
     () => ({
@@ -46,10 +64,35 @@ export const VideoRoom = memo(function VideoRoom({ lesson, isObserver = false, i
     iframe.allow = 'camera; microphone; display-capture; autoplay; fullscreen';
   }, []);
 
+  if (!lesson?.id) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-gray-900 text-gray-300 text-xs">
+        Урок не найден
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-gray-900 text-red-400 text-xs text-center p-4">
+        Ошибка видео: {error}
+      </div>
+    );
+  }
+
+  if (!jwt) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-gray-900 text-gray-400 text-xs animate-pulse">
+        Подключение к защищенной комнате...
+      </div>
+    );
+  }
+
   return (
     <JitsiMeeting
       domain="meet.beechessacademy.com"
       roomName={roomName}
+      jwt={jwt} // <--- ВОТ ЭТО ДАЕТ ПРАВА МОДЕРАТОРА
       configOverwrite={configOverwrite}
       interfaceConfigOverwrite={interfaceConfigOverwrite}
       userInfo={{
