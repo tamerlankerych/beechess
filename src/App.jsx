@@ -498,7 +498,7 @@ export default function App() {
   if (!session) return <LoginScreen />;
 
   // ==========================================
-  // ИНТЕРФЕЙС ДЛЯ УЧЕНИКА (Chess.com Style, Адаптивный)
+  // ИНТЕРФЕЙС ДЛЯ УЧЕНИКА
   // ==========================================
   if (userRole === 'student' && !activeLesson) {
     return (
@@ -574,18 +574,25 @@ export default function App() {
           </button>
         </header>
 
-        {/* ОСНОВНОЙ КОНТЕНТ */}
-        <main className="flex-1 overflow-y-auto flex justify-center">
-          <Suspense fallback={<div className="p-10 text-center text-gray-400">Загрузка...</div>}>
-            {activeTab === 'student-panel' && (
-              <div className="w-full max-w-4xl p-4 md:p-8 pb-24 md:pb-8">
-                <StudentDashboard onOpenLesson={handleStudentOpenLesson} />
-              </div>
-            )}
-            {activeTab === 'bot-arena' && (
-              <BotArena currentUser={session?.user} />
-            )}
-          </Suspense>
+        {/* ОСНОВНОЙ КОНТЕНТ + БЛОК-СПЕЙСЕР */}
+        <main className="flex-1 overflow-y-auto w-full">
+          <div className="flex justify-center w-full">
+            <div className="w-full max-w-5xl">
+              <Suspense fallback={<div className="p-10 text-center text-gray-400">Загрузка...</div>}>
+                {activeTab === 'student-panel' && (
+                  <div className="p-4 md:p-8">
+                    <StudentDashboard onOpenLesson={handleStudentOpenLesson} />
+                  </div>
+                )}
+                {activeTab === 'bot-arena' && (
+                  <BotArena currentUser={session?.user} />
+                )}
+              </Suspense>
+            </div>
+          </div>
+          
+          {/* ВОТ ОН - НЕВИДИМЫЙ БАМПЕР (112 пикселей пустоты) */}
+          <div className="h-28 md:hidden shrink-0" />
         </main>
 
         {/* МОБИЛЬНОЕ НИЖНЕЕ МЕНЮ */}
@@ -611,7 +618,6 @@ export default function App() {
               <span className="text-[10px] font-bold">Арена</span>
             </button>
           </div>
-          {/* Отступ для полоски iPhone */}
           <div className="pb-[env(safe-area-inset-bottom)] bg-[#262421]" />
         </nav>
       </div>
@@ -767,7 +773,7 @@ export default function App() {
                 onStartCrmRoom={handleStartCrmLesson}
               />
             ) : userRole === 'admin' || userRole === 'crm_admin' ? (
-              <AdminDashboard userRole={userRole} onObserveRoom={handleOpenStudentRoom} />
+              <AdminDashboard userRole={userRole} onOpenRoom={handleOpenStudentRoom} />
             ) : (
               <StudentDashboard onOpenLesson={handleStudentOpenLesson} />
             ))}
