@@ -1,3 +1,4 @@
+// src/HomeworkTeacher.jsx
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from './supabaseClient';
 import { fetchMyStudentIds } from './studentScope';
@@ -252,13 +253,15 @@ export const HomeworkTeacher = () => {
   const createRule = async () => {
     if (!userId || busy) return;
     const ruleGroup = groups.find((g) => g.id === ruleGroupId);
-    const ruleStudents = ruleGroup ? ruleGroup.memberIds : selected;
-    if (ruleStudents.length === 0) {
+    
+    // ИСПРАВЛЕНИЕ: Если выбрана группа, мы передаем пустой массив student_ids.
+    // Благодаря этому SQL-функция будет всегда брать АКТУАЛЬНЫЙ состав группы (включая новичков).
+    const ruleStudents = ruleGroup ? [] : selected; 
+    
+    if (!ruleGroup && ruleStudents.length === 0) {
       setNotice({
         type: 'err',
-        text: ruleGroup
-          ? 'В этой группе пока нет учеников.'
-          : 'Выберите группу или отметьте учеников выше.',
+        text: 'Выберите группу или отметьте учеников выше.',
       });
       return;
     }
@@ -524,7 +527,7 @@ export const HomeworkTeacher = () => {
             <option value="">Отмеченные выше ученики (состав фиксируется)</option>
             {groups.map((g) => (
               <option key={g.id} value={g.id}>
-                Группа «{g.name}» (состав берётся на момент выдачи)
+                Группа «{g.name}» (состав берется на момент выдачи)
               </option>
             ))}
           </select>
@@ -623,9 +626,11 @@ export const HomeworkTeacher = () => {
                     · набор {r.n_mate1}+{r.n_mate2}+
                     {r.n_mate3} · уровень {r.level}: {LEVEL_NAMES[r.level - 1]}
                   </div>
-                  <div className="text-[11px] text-gray-400 truncate">
-                    {r.student_ids.map((id) => names[id] || 'Ученик').join(', ')}
-                  </div>
+                  {!r.group_id && (
+                    <div className="text-[11px] text-gray-400 truncate">
+                      {r.student_ids.map((id) => names[id] || 'Ученик').join(', ')}
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <button
