@@ -67,7 +67,6 @@ const playSound = (type) => {
       osc.start(now);
       osc.stop(now + 0.1);
     } else if (type === 'tick' || type === 'go' || type === 'lowtime') {
-      // 'tick' — секунда отсчёта, 'go' — старт тура, 'lowtime' — двойной сигнал «мало времени»
       const freq = type === 'go' ? 1320 : type === 'lowtime' ? 988 : 660;
       const dur = type === 'go' ? 0.5 : 0.12;
       osc.type = 'sine';
@@ -176,9 +175,6 @@ const expandFenRows = (fen) =>
       return cells;
     });
 
-// chess.js (при skipValidation) верит праву рокировки на слово: если в FEN стоит KQkq,
-// а король не на e1/e8 (например, в углу), генерация ходов ломается и фигуры «не ходят».
-// Оставляем только те права, которые реально возможны на этой доске.
 const sanitizeCastlingInFen = (fen) => {
   const parts = fen.split(' ');
   const rows = expandFenRows(fen);
@@ -197,7 +193,6 @@ const sanitizeCastlingInFen = (fen) => {
   return parts.join(' ');
 };
 
-// Возвращает текст проблемы или null, если позицию можно играть
 const validateEditorPosition = (fen) => {
   const rows = expandFenRows(fen);
   const flat = rows.flat();
@@ -207,7 +202,6 @@ const validateEditorPosition = (fen) => {
     return 'Пешки не могут стоять на первой и восьмой горизонталях.';
   }
   try {
-    // Если король стороны, которая НЕ ходит, под шахом — позиция невозможна
     const parts = fen.split(' ');
     parts[1] = parts[1] === 'w' ? 'b' : 'w';
     parts[2] = '-';
@@ -220,13 +214,11 @@ const validateEditorPosition = (fen) => {
   return null;
 };
 
-// В редакторе: null = режим перемещения (клик ничего не меняет), EDITOR_ERASER = ластик
 const EDITOR_ERASER = '__eraser__';
 
 const LOW_TIME_MS = 10000;
 const COUNTDOWN_SECONDS = 5;
 
-// Рисует время и краснеет при малом остатке
 const setClockText = (el, ms) => {
   if (!el) return;
   el.textContent = formatTime(ms);
@@ -285,13 +277,6 @@ const describeMyResult = (res, myColor) => {
   return (whiteWon && myColor === 'w') || (!whiteWon && myColor === 'b') ? 'Победа' : 'Поражение';
 };
 
-/**
- * Полная сетка круговой системы (метод «круга») на все туры вперёд.
- * Цвета: игрок на первой доске чередует цвет каждый тур, на остальных досках
- * цвет определяется чётностью номера доски. Для чётного N это даёт разницу
- * белых/чёрных не больше 1 и не более одного «слома» чередования на игрока.
- * При нечётном N в каждом туре один игрок пропускает тур (bye).
- */
 const generateRoundRobinSchedule = (participants) => {
   const list = participants.map((p) => ({ id: p.id, name: p.name }));
   if (list.length % 2 !== 0) list.push(null);
@@ -356,7 +341,6 @@ const computeStandings = (tournament) => {
       }
     });
   });
-  // Зоннеборн-Бергер: очки побеждённых соперников + половина очков тех, с кем ничья
   games.forEach(({ w, b, result }) => {
     if (result === '1-0') w.sb += b.points;
     else if (result === '0-1') b.sb += w.points;
@@ -374,7 +358,6 @@ const computeStandings = (tournament) => {
   );
 };
 
-/** Воспроизводит партию по списку SAN-ходов и строит линейное дерево ходов. */
 const replayMoves = (moves = []) => {
   const game = new Chess();
   const tree = {
@@ -397,7 +380,6 @@ const replayMoves = (moves = []) => {
   return { game, tree, currentId: parentId };
 };
 
-/** Может ли сторона теоретически поставить мат (для правила просрочки времени). */
 const hasMatingMaterial = (game, color) => {
   const pieces = game
     .board()
@@ -418,7 +400,6 @@ const detectGameOver = (game) => {
   if (game.isDraw()) return { result: '1/2-1/2', reason: 'fifty' };
   return null;
 };
-
 /* ============================================================
    Панель кругового турнира (только отображение; логика — в комнате)
    ============================================================ */
@@ -440,6 +421,7 @@ const TournamentPanel = ({
   onNewTournament,
   onResign,
   onWatchTable,
+  onReviewGame,
   onPause,
   onResume,
   countdownActive,
@@ -715,12 +697,47 @@ const TournamentPanel = ({
       )}
 
       {isFinished && isTeacher && !isObserver && (
-        <button
-          onClick={onNewTournament}
-          className="w-full mb-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition cursor-pointer"
-        >
-          ➕ Новый турнир
-        </button>
+        <>
+          <div className="mb-2 mt-1">
+            <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide px-1 mb-1">
+              🔍 Разбор партий
+            </div>
+            <div className="space-y-1 max-h-72 overflow-y-auto">
+              {tournament.schedule.flatMap((ri) =>
+                ri.pairings.map((pair) => {
+                  const key = `${ri.round}:${pair.table}`;
+                  const res = tournament.results?.[key];
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => onReviewGame?.(ri.round, pair.table)}
+                      className="w-full text-left rounded-lg border border-slate-200 bg-white hover:border-blue-400 hover:bg-blue-50 px-2 py-1.5 text-xs cursor-pointer transition"
+                    >
+                      <div className="flex justify-between items-center gap-2">
+                        <span className="text-gray-500 font-semibold">
+                          Тур {ri.round} · Стол {pair.table}
+                        </span>
+                        <span className="text-[10px] font-black bg-slate-800 text-white px-1.5 py-0.5 rounded">
+                          {res ? formatGameResult(res) : '—'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-1 mt-0.5">
+                        <span className="truncate">⬜ {pair.white.name}</span>
+                        <span className="truncate text-right">⬛ {pair.black.name}</span>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+          <button
+            onClick={onNewTournament}
+            className="w-full mb-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+          >
+            ➕ Новый турнир
+          </button>
+        </>
       )}
 
       {tournament && (
@@ -819,6 +836,13 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   const [lobbyJoined, setLobbyJoined] = useState(false);
   const lobbyJoinedRef = useRef(false);
 
+  // НОВОЕ: состояние разбора партии после турнира
+  const [reviewGame, setReviewGame] = useState(null);
+  const reviewGameRef = useRef(null);
+  useEffect(() => {
+    reviewGameRef.current = reviewGame;
+  }, [reviewGame]);
+
   const tournamentRef = useRef(null);
   const gameCtxRef = useRef(null);
   const currentUserRef = useRef(null);
@@ -898,7 +922,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     ensureCurrentUser();
   }, [ensureCurrentUser]);
 
-  // Участники = ученики, нажавшие «Участвовать» (Presence), + тренер по переключателю
   const lessonParticipants = useMemo(() => {
     const list = [...lobbyPlayers];
     if (tournamentSettings.includeTeacher && currentUser?.id) {
@@ -1037,15 +1060,12 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     });
   };
 
-  // Часы считаются по реальному времени (Date.now), а не по числу тиков, поэтому
-  // не «уплывают» при троттлинге таймеров в фоновой вкладке. Сеть не используется.
   const tickClock = useCallback(() => {
     const now = Date.now();
     const delta = Math.max(0, now - lastTickRef.current);
     lastTickRef.current = now;
     if (!clockStartedRef.current) return;
 
-    // Сигнал при 10 секундах: один раз на сторону, в турнире — только тому, чьи это часы
     const checkLowTime = (c, remaining) => {
       if (remaining > LOW_TIME_MS) {
         lowTimeWarnedRef.current[c] = false;
@@ -1150,7 +1170,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   const toggleBoardOrientation = () => {
     const nextOrientation = orientation === COLOR.white ? COLOR.black : COLOR.white;
     setOrientation(nextOrientation);
-    if (tournamentRef.current?.status === 'running') return; // в турнире доска переворачивается только локально
+    if (tournamentRef.current?.status === 'running') return;
 
     channelRef.current?.send({
       type: 'broadcast',
@@ -1413,12 +1433,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     setPendingPromotion(null);
     executeMove(from, to, promotion);
   };
-
   /* ============================================================
      Круговой турнир: полностью автоматический процесс.
-     Координатор (тренер) собирает результаты и сам запускает следующий тур.
-     Каждая партия идёт локально у двух игроков; ходы летят через Broadcast,
-     а FEN + остаток времени + clock_updated_at пишутся в БД только при ходе.
      ============================================================ */
   const tournamentRunning = tournament?.status === 'running';
 
@@ -1443,7 +1459,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     setCountdown(null);
   };
 
-  // Отсчёт 5‑4‑3‑2‑1 со звуком; по нулю вызывается onGo (старт часов и разблокировка ходов)
   const runCountdown = (ms, onGo) => {
     cancelCountdown();
     countdownActiveRef.current = true;
@@ -1552,8 +1567,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     }
   };
 
-  // Применяет «снимок» стола: позиция + часы. При running и updatedAt остаток
-  // времени = остаток − (сейчас − clock_updated_at).
   const applyTableSnapshot = ({ moves = [], timerW: w0, timerB: b0, updatedAt = null, running = true }) => {
     const { game, tree: nextTree, currentId: nextCurrentId } = replayMoves(moves);
     gameRef.current = game;
@@ -1606,8 +1619,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     return { expiredColor };
   };
 
-  // Вход в тур: определяем соперника, цвет, ориентацию доски, ставим часы и позицию.
-  // restore=true — берём состояние стола из БД (перезагрузка страницы / поздний вход).
   const enterRound = async (st, restore = false) => {
     const me = await ensureCurrentUser();
     tournamentRef.current = st;
@@ -1666,7 +1677,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         : { moves: [], timerW: totalMs, timerB: totalMs, updatedAt: startsAtIso, running: live };
     }
 
-    // Партия ещё не начиналась — сначала отсчёт 5‑4‑3‑2‑1, часы и ходы заморожены
     let startDelayMs = 0;
     if (live && snapshot.moves.length === 0 && (!restore || !row)) {
       const target = restore ? startsAtMs : Date.now() + COUNTDOWN_SECONDS * 1000;
@@ -1698,12 +1708,10 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     if (expiredColor) clockExpiredRef.current?.(expiredColor);
   };
 
-  // Не координатор не должен держать таймер перехода между турами
   const clearNextRoundTimerIfNotCoordinator = () => {
     if (!isTeacher) clearNextRoundTimer();
   };
 
-  // Наблюдение за другим столом (тренер без партии, отдыхающие игроки, наблюдатели)
   const watchTournamentTable = async (table) => {
     const st = tournamentRef.current;
     const ctx = gameCtxRef.current;
@@ -1748,7 +1756,89 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     if (expiredColor) clockExpiredRef.current?.(expiredColor);
   };
 
-  // Игрок фиксирует итог своей партии: стопорим часы, шлём результат координатору
+  /* ----- Разбор партий турнира ----- */
+
+  const openTournamentReview = async (round, table) => {
+    const st = tournamentRef.current;
+    if (!st || st.status !== 'finished') return;
+    const { data: row } = await supabase
+      .from('tournament_games')
+      .select('*')
+      .eq('tournament_id', st.id)
+      .eq('round', round)
+      .eq('table_no', table)
+      .maybeSingle();
+    if (!row) {
+      window.alert('Партия не найдена в базе. Возможно, она не сохранилась.');
+      return;
+    }
+    const moves = row.moves || [];
+    const { tree: rt, currentId: rcid } = replayMoves(moves);
+    const pair = st.schedule[round - 1]?.pairings.find((p) => p.table === table);
+    const nr = {
+      round, table, moves,
+      tree: rt, currentId: rcid, totalPly: moves.length,
+      whiteName: pair?.white.name || '—',
+      blackName: pair?.black.name || '—',
+      result: st.results?.[`${round}:${table}`] || (row.result ? { result: row.result, reason: row.reason } : null),
+    };
+    setReviewGame(nr);
+    reviewGameRef.current = nr;
+    if (chessboardInstance.current) {
+      chessboardInstance.current.setPosition(rt[rcid]?.fen || INITIAL_FEN, true);
+      chessboardInstance.current.removeMarkers();
+      chessboardInstance.current.removeArrows();
+    }
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'tournament_action',
+      payload: { event: 'review_open', round, table, moves },
+    });
+  };
+
+  const stepTournamentReview = (delta) => {
+    const r = reviewGameRef.current;
+    if (!r) return;
+    let nextId = r.currentId;
+    const node = r.tree[r.currentId];
+    if (delta === -999) {
+      nextId = 'root';
+    } else if (delta === 999) {
+      let id = 'root';
+      let guard = 0;
+      while (r.tree[id]?.children?.[0] && guard++ < 500) id = r.tree[id].children[0];
+      nextId = id;
+    } else if (delta < 0) {
+      nextId = node?.parentId || 'root';
+    } else if (delta > 0) {
+      nextId = node?.children?.[0] || r.currentId;
+    }
+    const nr = { ...r, currentId: nextId };
+    setReviewGame(nr);
+    reviewGameRef.current = nr;
+    if (chessboardInstance.current) {
+      chessboardInstance.current.setPosition(r.tree[nextId]?.fen || INITIAL_FEN, true);
+    }
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'tournament_action',
+      payload: { event: 'review_nav', currentId: nextId },
+    });
+  };
+
+  const closeTournamentReview = () => {
+    setReviewGame(null);
+    reviewGameRef.current = null;
+    if (chessboardInstance.current) {
+      chessboardInstance.current.setPosition(gameRef.current.fen(), true);
+    }
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'tournament_action',
+      payload: { event: 'review_close' },
+    });
+  };
+
   const reportTournamentResult = (res) => {
     const ctx = gameCtxRef.current;
     const st = tournamentRef.current;
@@ -1770,7 +1860,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     if (isTeacher) recordTournamentResult(payload);
   };
 
-  // Собственный ход в турнирной партии
   const playTournamentMove = (from, to, promotion) => {
     const ctx = gameCtxRef.current;
     const st = tournamentRef.current;
@@ -1785,7 +1874,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       return false;
     }
 
-    // Фиксируем точный остаток времени на момент хода
     tickClock();
     if (gameCtxRef.current?.finished) {
       resetBoard();
@@ -1804,7 +1892,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     }
 
     const newFen = gameRef.current.fen();
-    applyRemoteMove(move, newFen); // дерево ходов, звук, +инкремент, смена очереди часов
+    applyRemoteMove(move, newFen);
     lastTickRef.current = Date.now();
 
     channelRef.current?.send({
@@ -1834,7 +1922,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     return true;
   };
 
-  // Повторная загрузка стола из БД (пропущен ход / рассинхрон)
   const resyncTable = async (table) => {
     const st = tournamentRef.current;
     if (!st) return;
@@ -1852,7 +1939,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     if (expiredColor) clockExpiredRef.current?.(expiredColor);
   };
 
-  // Ход соперника (или ход на наблюдаемом столе)
   const applyRemoteTournamentMove = (payload) => {
     const ctx = gameCtxRef.current;
     const st = tournamentRef.current;
@@ -1863,7 +1949,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
     const game = gameRef.current;
     const plyNow = game.history().length;
-    if (payload.ply <= plyNow) return; // дубликат
+    if (payload.ply <= plyNow) return;
     if (payload.ply !== plyNow + 1) {
       resyncTable(ctx.table);
       return;
@@ -1886,7 +1972,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
     applyRemoteMove(move, game.fen());
 
-    // Остаток времени после хода — от того, кто его сделал (без сетевых запросов каждую секунду)
     timerWRef.current = payload.timerW;
     timerBRef.current = payload.timerB;
     activeColorRef.current = game.turn();
@@ -1961,7 +2046,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     const st = tournamentRef.current;
     if (!st || st.status !== 'running' || st.id !== tournamentId || st.round !== round) return;
     const key = `${round}:${table}`;
-    if (st.results[key]) return; // результат стола уже занесён
+    if (st.results[key]) return;
 
     const next = { ...st, results: { ...st.results, [key]: { result, reason } } };
     const roundDone = next.schedule[round - 1].pairings.every(
@@ -2009,6 +2094,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     setTournament(null);
     updateGameCtx(null);
     stopLocalGame();
+    setReviewGame(null);
+    reviewGameRef.current = null;
     channelRef.current?.send({
       type: 'broadcast',
       event: 'tournament_action',
@@ -2022,7 +2109,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     endTournament();
   };
 
-  // Пауза: часы у всех встают, ходы блокируются; время простоя не списывается
   const pauseLocalClock = () => {
     tickClock();
     clockStartedRef.current = false;
@@ -2040,7 +2126,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     lastTickRef.current = Date.now();
     clockStartedRef.current = true;
     setClockStarted(true);
-    if (ctx.myColor) persistTournamentGame(); // обновляем clock_updated_at на момент возобновления
+    if (ctx.myColor) persistTournamentGame();
   };
 
   const pauseTournament = () => {
@@ -2059,7 +2145,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       (p) => resumed.results[`${resumed.round}:${p.table}`]
     );
     if (roundDone) {
-      // тур закончился во время паузы — идём дальше
       if (resumed.round >= resumed.totalRounds) finishTournament(resumed);
       else scheduleNextRound(resumed);
       return;
@@ -2076,8 +2161,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       reason: 'resign',
     });
   };
-
-  /* ----- Приём общего состояния ----- */
 
   const adoptTournamentState = (st) => {
     if (!st) return;
@@ -2098,7 +2181,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     }
 
     const ctx = gameCtxRef.current;
-    // Пропустили начало тура — входим в него, восстанавливая стол из БД
     if (!ctx || ctx.tournamentId !== st.id || ctx.round < st.round) {
       enterRound(st, true);
       return;
@@ -2127,6 +2209,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         setTournament(null);
         updateGameCtx(null);
         stopLocalGame();
+        setReviewGame(null);
+        reviewGameRef.current = null;
         break;
       case 'game_move':
         applyRemoteTournamentMove(payload);
@@ -2134,13 +2218,50 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       case 'game_result':
         recordTournamentResult(payload);
         break;
+      case 'review_open': {
+        const moves = payload.moves || [];
+        const { tree: rt, currentId: rcid } = replayMoves(moves);
+        const st = tournamentRef.current;
+        const pair = st?.schedule[payload.round - 1]?.pairings.find((p) => p.table === payload.table);
+        const nr = {
+          round: payload.round, table: payload.table, moves,
+          tree: rt, currentId: rcid, totalPly: moves.length,
+          whiteName: pair?.white.name || '—',
+          blackName: pair?.black.name || '—',
+          result: st?.results?.[`${payload.round}:${payload.table}`] || null,
+        };
+        setReviewGame(nr);
+        reviewGameRef.current = nr;
+        if (chessboardInstance.current) {
+          chessboardInstance.current.setPosition(rt[rcid]?.fen || INITIAL_FEN, true);
+          chessboardInstance.current.removeMarkers();
+          chessboardInstance.current.removeArrows();
+        }
+        break;
+      }
+      case 'review_nav': {
+        const r = reviewGameRef.current;
+        if (!r) break;
+        const nr = { ...r, currentId: payload.currentId };
+        setReviewGame(nr);
+        reviewGameRef.current = nr;
+        if (chessboardInstance.current) {
+          chessboardInstance.current.setPosition(r.tree[payload.currentId]?.fen || INITIAL_FEN, true);
+        }
+        break;
+      }
+      case 'review_close':
+        setReviewGame(null);
+        reviewGameRef.current = null;
+        if (chessboardInstance.current) {
+          chessboardInstance.current.setPosition(gameRef.current.fen(), true);
+        }
+        break;
       default:
         break;
     }
   };
 
-  // Тренер после перезагрузки: подбираем результаты, пришедшие пока он был офлайн,
-  // и возобновляем паузу между турами
   const resumeCoordinator = async (st) => {
     try {
       const { data } = await supabase
@@ -2171,7 +2292,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     }
   };
 
-  // Восстановление после обновления страницы / позднего входа в комнату
   const restoreTournament = async () => {
     if (!lesson?.id) return;
     try {
@@ -2187,7 +2307,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       if (!st.id || !st.schedule) return;
 
       const cur = tournamentRef.current;
-      if (cur && cur.id === st.id && cur.round >= st.round) return; // уже синхронизированы по Broadcast
+      if (cur && cur.id === st.id && cur.round >= st.round) return;
 
       tournamentRef.current = st;
       setTournament(st);
@@ -2200,7 +2320,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     }
   };
 
-  // Конец времени: в турнире — результат партии, в обычном уроке — как раньше
   const handleClockExpired = (color) => {
     clockStartedRef.current = false;
     setClockStarted(false);
@@ -2237,7 +2356,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     }
   };
 
-  // Ученик записывается в турнир / выходит из лобби (Presence на канале урока)
   const toggleLobby = async () => {
     if (isTeacher || isObserver || !channelRef.current) return;
     const user = await ensureCurrentUser();
@@ -2259,7 +2377,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     }
   };
 
-  // Обработчики всегда видят свежие замыкания через ref (канал создаётся один раз)
   tournamentApiRef.current = {
     playMove: playTournamentMove,
     handleAction: handleTournamentAction,
@@ -2275,7 +2392,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     []
   );
 
-  // Клетка под указателем в момент отпускания (с запасом на рамку доски)
   const resolveDropSquare = () => {
     const el = boardRef.current;
     const p = lastPointerRef.current;
@@ -2421,12 +2537,17 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
         chessboardInstance.current.setPosition(freshFen, false);
 
         chessboardInstance.current.enableMoveInput((event) => {
+          // Разбор партии: доска read-only
+          if (reviewGameRef.current) {
+            try {
+              const r = reviewGameRef.current;
+              chessboardInstance.current?.setPosition(r.tree[r.currentId]?.fen || INITIAL_FEN);
+            } catch {}
+            return false;
+          }
           if (isEditorModeRef.current) {
             if (event.type === 'moveInputStarted') return true;
             if (event.type === 'moveInputFinished' && event.squareFrom) {
-              // Если библиотека не определила клетку (отпустили у самого края/в углу),
-              // определяем её по координатам указателя. Удаляем фигуру, только если
-              // её реально утащили за пределы доски.
               let target = event.squareTo || null;
               let removeIt = false;
               if (!target) {
@@ -2447,7 +2568,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
               const updated = updateFenBoard(tempEditorFenRef.current, (board) => {
                 const piece = board[fromRank][fromFile];
                 board[fromRank][fromFile] = null;
-                // не затираем клетку назначения, если на исходной уже ничего нет
                 if (!removeIt && piece) board[toRank][toFile] = piece;
               });
 
@@ -2790,10 +2910,8 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
   const handleBoardClickForEditor = (e) => {
     if (!isEditorMode) return;
-    // Это было перетаскивание фигуры, а не клик — не трогаем клетку
     const down = editorDownRef.current;
     if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return;
-    // Режим перемещения: клик по доске ничего не стирает и не ставит
     if (selectedEditorPiece === null) return;
 
     const squareEl = e.target.closest?.('[data-square]');
@@ -3277,7 +3395,9 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                     }`}
                   />
                   <span className="text-[11px] text-gray-500">
-                    {tournamentRunning
+                    {reviewGame
+                      ? `Режим разбора: тур ${reviewGame.round}, стол ${reviewGame.table}`
+                      : tournamentRunning
                       ? `${tournament.paused ? 'Пауза' : 'Идёт турнир'} — тур ${tournament.round} из ${tournament.totalRounds}`
                       : isObserver
                       ? 'Режим наблюдателя — управление отключено'
@@ -3294,14 +3414,14 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                 <>
                   <button
                     onClick={() => setIsMaterialsOpen(true)}
-                    disabled={tournamentRunning}
+                    disabled={tournamentRunning || !!reviewGame}
                     className="px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-xs font-bold transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     📚 Материалы
                   </button>
                   <button
                     onClick={toggleStudentAccess}
-                    disabled={tournamentRunning}
+                    disabled={tournamentRunning || !!reviewGame}
                     className={`px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
                       canStudentMove
                         ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
@@ -3344,7 +3464,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
               </div>
             )}
 
-            {tournament && gameCtx && tablePair && (
+            {tournament && gameCtx && tablePair && !reviewGame && (
               <div
                 className={`flex w-full max-w-[660px] flex-col gap-0.5 rounded-xl border px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between ${
                   gameCtx.finished
@@ -3376,7 +3496,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             <div className="w-full max-w-[660px]">
               <div
                 className={`relative w-full rounded-xl border border-gray-200 overflow-hidden shadow-inner ${
-                  isEditorMode ? 'ring-2 ring-blue-500' : ''
+                  isEditorMode ? 'ring-2 ring-blue-500' : reviewGame ? 'ring-2 ring-amber-400' : ''
                 }`}
                 style={{ paddingBottom: '100%' }}
               >
@@ -3394,7 +3514,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
                     isEditorMode ? 'cursor-crosshair' : 'cursor-pointer'
                   }`}
                 />
-                {tournament && (countdown !== null || tournament.paused) && (
+                {tournament && (countdown !== null || tournament.paused) && !reviewGame && (
                   <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-900/55">
                     {countdown !== null ? (
                       <>
@@ -3420,7 +3540,45 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
               </div>
             </div>
 
-            {isTeacher && (
+            {reviewGame && (
+              <div className="w-full max-w-[660px] bg-amber-50 border-2 border-amber-300 rounded-xl p-2.5 flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-bold text-amber-900">
+                    🔍 Разбор · Тур {reviewGame.round}, стол {reviewGame.table}
+                  </div>
+                  <button
+                    onClick={closeTournamentReview}
+                    className="text-xs px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700 font-bold cursor-pointer"
+                  >
+                    ✕ Закрыть
+                  </button>
+                </div>
+                <div className="text-xs text-amber-800 flex justify-between gap-2 items-center">
+                  <span className="truncate">⬜ {reviewGame.whiteName}</span>
+                  <span className="font-bold shrink-0">
+                    {reviewGame.result ? formatGameResult(reviewGame.result) : '—'}
+                  </span>
+                  <span className="truncate text-right">⬛ {reviewGame.blackName}</span>
+                </div>
+                <div className="flex items-center justify-center gap-1.5">
+                  <button onClick={() => stepTournamentReview(-999)} className="px-2.5 py-1 rounded bg-white border border-amber-200 hover:bg-amber-100 text-xs font-bold cursor-pointer" title="В начало">⏮</button>
+                  <button onClick={() => stepTournamentReview(-1)} className="px-2.5 py-1 rounded bg-white border border-amber-200 hover:bg-amber-100 text-xs font-bold cursor-pointer" title="Назад">◀</button>
+                  <span className="text-xs font-bold px-3 text-amber-900 min-w-[60px] text-center">
+                    {(() => {
+                      let n = 0;
+                      let id = reviewGame.currentId;
+                      let g = 0;
+                      while (id && id !== 'root' && g++ < 500) { n += 1; id = reviewGame.tree[id]?.parentId; }
+                      return `${n} / ${reviewGame.totalPly}`;
+                    })()}
+                  </span>
+                  <button onClick={() => stepTournamentReview(1)} className="px-2.5 py-1 rounded bg-white border border-amber-200 hover:bg-amber-100 text-xs font-bold cursor-pointer" title="Вперёд">▶</button>
+                  <button onClick={() => stepTournamentReview(999)} className="px-2.5 py-1 rounded bg-white border border-amber-200 hover:bg-amber-100 text-xs font-bold cursor-pointer" title="В конец">⏭</button>
+                </div>
+              </div>
+            )}
+
+            {isTeacher && !reviewGame && (
               <div className="w-full max-w-[660px] grid grid-cols-2 sm:grid-cols-3 gap-2">
                 <button
                   onClick={() => {
@@ -3458,7 +3616,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             )}
           </div>
 
-          {isTeacher && isEditorMode && (
+          {isTeacher && isEditorMode && !reviewGame && (
             <div className="w-full bg-blue-50/90 border border-blue-200 p-4 rounded-2xl shadow-sm flex flex-col gap-3">
               <div className="flex justify-between items-center text-xs font-bold text-blue-900">
                 <span>⚙️ Редактор позиции (перетаскивание)</span>
@@ -3688,7 +3846,7 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
               </div>
             </div>
 
-            {isTeacher && !tournamentRunning && (
+            {isTeacher && !tournamentRunning && !reviewGame && (
               <div className="grid grid-cols-4 gap-1.5 mt-2 text-[11px] font-sans">
                 <button
                   onClick={() => setTimeControl(3, 2)}
@@ -3722,29 +3880,31 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
             )}
           </div>
 
-          {/* Панель кругового турнира */}
-          <TournamentPanel
-            isTeacher={isTeacher}
-            isObserver={isObserver}
-            tournament={tournament}
-            standings={standings}
-            settings={tournamentSettings}
-            onSettingsChange={setTournamentSettings}
-            participantCount={lessonParticipants.length}
-            lobbyPlayers={lobbyPlayers}
-            lobbyJoined={lobbyJoined}
-            onToggleJoin={toggleLobby}
-            currentUserId={currentUser?.id}
-            gameCtx={gameCtx}
-            onStart={startTournament}
-            onAbort={abortTournament}
-            onNewTournament={endTournament}
-            onResign={resignTournamentGame}
-            onWatchTable={watchTournamentTable}
-            onPause={pauseTournament}
-            onResume={resumeTournament}
-            countdownActive={countdown !== null}
-          />
+          {!reviewGame && (
+            <TournamentPanel
+              isTeacher={isTeacher}
+              isObserver={isObserver}
+              tournament={tournament}
+              standings={standings}
+              settings={tournamentSettings}
+              onSettingsChange={setTournamentSettings}
+              participantCount={lessonParticipants.length}
+              lobbyPlayers={lobbyPlayers}
+              lobbyJoined={lobbyJoined}
+              onToggleJoin={toggleLobby}
+              currentUserId={currentUser?.id}
+              gameCtx={gameCtx}
+              onStart={startTournament}
+              onAbort={abortTournament}
+              onNewTournament={endTournament}
+              onResign={resignTournamentGame}
+              onWatchTable={watchTournamentTable}
+              onReviewGame={openTournamentReview}
+              onPause={pauseTournament}
+              onResume={resumeTournament}
+              countdownActive={countdown !== null}
+            />
+          )}
         </aside>
       </div>
     </div>

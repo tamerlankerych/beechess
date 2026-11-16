@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from './supabaseClient';
 import { fetchMyStudentIds } from './studentScope';
 import { HomeworkTeacher } from './HomeworkTeacher.jsx';
+import { EditableGroupName } from './EditableGroupName';
 
 export const TeacherDashboard = ({
   onOpenRoom,
@@ -719,7 +720,22 @@ const GroupsTab = ({ userId, onOpenGroupRoom }) => {
                 className="flex flex-col sm:flex-row gap-3 items-center justify-between p-3 bg-emerald-50/40 rounded-xl border border-emerald-100"
               >
                 <div className="flex-1 w-full">
-                  <div className="text-sm font-bold text-gray-900">{group.name}</div>
+                  <EditableGroupName
+                    group={group}
+                    className="text-sm font-bold text-gray-900"
+                    onRenamed={(updated) => {
+                      setGroups((prev) =>
+                        prev.map((g) =>
+                          g.id === updated.id ? { ...g, name: updated.name } : g
+                        )
+                      );
+                      setSelectedGroup((prev) =>
+                        prev && prev.id === updated.id
+                          ? { ...prev, name: updated.name }
+                          : prev
+                      );
+                    }}
+                  />
                   <div className="text-xs text-gray-500 mt-0.5">
                     Учеников: {group.memberIds.length}
                   </div>

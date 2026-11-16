@@ -6,6 +6,42 @@ import { ChessPieceIcon } from './ChessPieceIcon.jsx';
 const CACHE_KEY = 'beechess_materials_cache_v1';
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 час
 
+const POS_KEY_PREFIX = 'beechess_materials_pos_v1';
+
+// Читаем userId синхронно из кэша роли, который уже пишет App.jsx
+const getCachedUserId = () => {
+  try {
+    const raw = localStorage.getItem('beechess_role_cache');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.userId || null;
+  } catch {
+    return null;
+  }
+};
+
+const readSavedPosition = (userId) => {
+  if (!userId) return null;
+  try {
+    const raw = localStorage.getItem(`${POS_KEY_PREFIX}_${userId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const writeSavedPosition = (userId, pos) => {
+  if (!userId) return;
+  try {
+    localStorage.setItem(`${POS_KEY_PREFIX}_${userId}`, JSON.stringify(pos));
+  } catch {
+    // localStorage может быть переполнен — игнорируем
+  }
+};
+
 const readCache = () => {
   try {
     const raw = sessionStorage.getItem(CACHE_KEY);
@@ -66,20 +102,49 @@ const PositionPreview = ({ fen }) => {
 };
 
 export const MaterialsLibrary = ({ onClose, onOpenPosition }) => {
+  // СИНХРОННАЯ инициализация — позиция подставляется до первого рендера
+  const cachedUserId = getCachedUserId();
+  const initialPos = readSavedPosition(cachedUserId);
+
   const [materials, setMaterials] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [selectedModule, setSelectedModule] = useState('1000-1300');
-  const [selectedSection, setSelectedSection] = useState('');
-  const [selectedTopicNumber, setSelectedTopicNumber] = useState(null);
+  const [userId, setUserId] = useState(cachedUserId);
+  const [selectedModule, setSelectedModule] = useState(
+    initialPos?.module || '1000-1300'
+  );
+  const [selectedSection, setSelectedSection] = useState(
+    initialPos?.section || ''
+  );
+  const [selectedTopicNumber, setSelectedTopicNumber] = useState(
+    initialPos?.topicNumber ?? null
+  );
   const [search, setSearch] = useState('');
   const [revealedSolutions, setRevealedSolutions] = useState(() => new Set());
+
+  // Резерв: если userId не было в кэше — подтягиваем асинхронно (редко, при первом входе)
+  useEffect(() => {
+    if (userId) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (cancelled) return;
+        const id = data?.user?.id || null;
+        if (id) setUserId(id);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   useEffect(() => {
     let cancelled = false;
 
     const loadMaterials = async () => {
-      // 1. Пробуем кэш
       const cached = readCache();
       if (cached && cached.length > 0) {
         setMaterials(cached);
@@ -87,7 +152,6 @@ export const MaterialsLibrary = ({ onClose, onOpenPosition }) => {
         return;
       }
 
-      // 2. Кэша нет — грузим из БД
       setLoading(true);
       setError('');
 
@@ -103,7 +167,6 @@ export const MaterialsLibrary = ({ onClose, onOpenPosition }) => {
           return;
         }
 
-        // Параллельная загрузка всех страниц
         const pageSize = 1000;
         const pages = Math.ceil(total / pageSize);
 
@@ -202,6 +265,17 @@ export const MaterialsLibrary = ({ onClose, onOpenPosition }) => {
 
   const activeTopic = topics.find((topic) => topic.topic_number === activeTopicNumber);
 
+  // Сохранение при каждом изменении позиции (после того, как материалы загрузились)
+  useEffect(() => {
+    if (!userId) return;
+    if (!activeModule) return;
+    writeSavedPosition(userId, {
+      module: activeModule,
+      section: activeSection,
+      topicNumber: activeTopicNumber,
+    });
+  }, [userId, activeModule, activeSection, activeTopicNumber]);
+
   const toggleSolution = (puzzleId) => {
     setRevealedSolutions((current) => {
       const next = new Set(current);
@@ -210,6 +284,7 @@ export const MaterialsLibrary = ({ onClose, onOpenPosition }) => {
       return next;
     });
   };
+
   return (
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 p-2 sm:p-5"
