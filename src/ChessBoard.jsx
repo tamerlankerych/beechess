@@ -400,6 +400,7 @@ const detectGameOver = (game) => {
   if (game.isDraw()) return { result: '1/2-1/2', reason: 'fifty' };
   return null;
 };
+
 /* ============================================================
    Панель кругового турнира (только отображение; логика — в комнате)
    ============================================================ */
@@ -800,7 +801,6 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
 
   const saveQueueRef = useRef(null);
   const saveTimerRef = useRef(null);
-
   const [canStudentMove, setCanStudentMove] = useState(false);
   const [isVideoOpen, setIsVideoOpen] = useState(true);
   const [orientation, setOrientation] = useState(COLOR.white);
@@ -836,12 +836,15 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   const [lobbyJoined, setLobbyJoined] = useState(false);
   const lobbyJoinedRef = useRef(false);
 
-  // НОВОЕ: состояние разбора партии после турнира
+  // Состояние разбора партии после турнира
   const [reviewGame, setReviewGame] = useState(null);
   const reviewGameRef = useRef(null);
   useEffect(() => {
     reviewGameRef.current = reviewGame;
   }, [reviewGame]);
+
+  // НОВОЕ: ref для функции перелистывания разбора (чтобы стрелки работали)
+  const stepTournamentReviewRef = useRef(null);
 
   const tournamentRef = useRef(null);
   const gameCtxRef = useRef(null);
@@ -1278,10 +1281,25 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
     []
   );
 
+  // НОВОЕ: Обработчик клавиатуры, который умеет переключаться между уроком и разбором
   useEffect(() => {
     if (!isTeacher) return;
     const handleKeyDown = (e) => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+
+      // Если открыт режим разбора партии — листаем ходы разбора
+      if (reviewGameRef.current) {
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          stepTournamentReviewRef.current?.(-1);
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          stepTournamentReviewRef.current?.(1);
+        }
+        return;
+      }
+
+      // Обычный режим урока
       const currId = currentIdRef.current;
       const currTree = treeRef.current;
       if (e.key === 'ArrowLeft') {
@@ -1825,6 +1843,9 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
       payload: { event: 'review_nav', currentId: nextId },
     });
   };
+
+  // НОВОЕ: Привязываем функцию к ref, чтобы обработчик клавиатуры всегда видел актуальную версию
+  stepTournamentReviewRef.current = stepTournamentReview;
 
   const closeTournamentReview = () => {
     setReviewGame(null);
