@@ -441,12 +441,12 @@ export const PuzzleSolver = ({ homework, userId, onBack }) => {
 
   return (
     <div className="max-w-5xl mx-auto space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
+            <div className="flex items-center justify-between gap-3 flex-wrap bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
         <button
           onClick={onBack}
-          className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-sm font-bold cursor-pointer"
+          className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold cursor-pointer transition-colors shadow-sm flex items-center gap-2"
         >
-          ← К расписанию
+          <span>←</span> Вернуться к расписанию
         </button>
         <div className="text-sm font-bold text-gray-900 truncate">{homework.title}</div>
         <div className="text-xs font-semibold text-gray-500">

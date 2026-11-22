@@ -533,12 +533,6 @@ export default function App() {
             </button>
           </nav>
 
-          <div className="px-3 pb-2">
-             <button className="w-full flex items-center gap-2 px-3 py-3 bg-gradient-to-r from-blue-600 to-sky-500 hover:from-blue-500 hover:to-sky-400 rounded-lg text-white font-bold text-sm shadow-lg transition-all">
-               <span className="text-xl">💎</span> Продлить абонемент
-             </button>
-          </div>
-
           <div className="p-3 border-t border-[#3d3b38]">
             <div className="flex items-center gap-3 px-2 py-2 mb-2">
               <div className="w-10 h-10 rounded-lg bg-emerald-600 flex items-center justify-center font-bold text-lg">

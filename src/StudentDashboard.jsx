@@ -194,9 +194,6 @@ export const StudentDashboard = ({ onOpenLesson }) => {
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
 
-  // ============================================================
-  // БЕЗ ОКНА -30 / +15 — можно зайти в любой момент
-  // ============================================================
   const getLessonStatus = (lesson) => {
     const start = new Date(lesson.starts_at);
     const end = new Date(lesson.ends_at);
@@ -212,7 +209,6 @@ export const StudentDashboard = ({ onOpenLesson }) => {
       return { label: 'Проведён', cls: 'bg-blue-50 text-blue-700', canJoin: false };
     }
 
-    // scheduled — зайти можно в любой момент
     if (nowMs >= start.getTime() && nowMs <= end.getTime()) {
       return { label: 'Идёт сейчас', cls: 'bg-emerald-100 text-emerald-800', canJoin: true };
     }
@@ -227,7 +223,6 @@ export const StudentDashboard = ({ onOpenLesson }) => {
   const isNegativeBalance = (balance ?? 0) < 0;
   const isZeroBalance = balance === 0;
 
-  // Открыто решение задач — показываем его вместо расписания
   if (activeHomework) {
     return (
       <PuzzleSolver
@@ -241,9 +236,10 @@ export const StudentDashboard = ({ onOpenLesson }) => {
     );
   }
 
-  const pendingHomework = homeworks.filter(
+  // НОВОЕ: Фильтруем ДЗ, оставляя только те, где решены НЕ все задачи
+  const pendingHomeworks = homeworks.filter(
     (h) => (hwSolved[h.id] || 0) < h.puzzle_ids.length
-  ).length;
+  );
 
   return (
     <div className="space-y-5 max-w-5xl mx-auto">
@@ -318,23 +314,21 @@ export const StudentDashboard = ({ onOpenLesson }) => {
         </div>
       </div>
 
-      {homeworks.length > 0 && (
+      {/* Показываем блок ДЗ только если есть НЕрешенные задания */}
+      {pendingHomeworks.length > 0 && (
         <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-black text-gray-900">📚 Домашние задания</h3>
-            {pendingHomework > 0 && (
-              <span className="px-2 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-bold">
-                не сдано: {pendingHomework}
-              </span>
-            )}
+            <h3 className="text-sm font-black text-gray-900">📚 Текущие задания</h3>
+            <span className="px-2 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-bold">
+              к выполнению: {pendingHomeworks.length}
+            </span>
           </div>
 
           <div className="space-y-2">
-            {homeworks.map((h) => {
+            {pendingHomeworks.map((h) => {
               const total = h.puzzle_ids.length;
               const done = hwSolved[h.id] || 0;
-              const finished = done >= total;
-              const overdue = !finished && h.due_at && new Date(h.due_at) < now;
+              const overdue = h.due_at && new Date(h.due_at) < now;
               const percent = total ? Math.round((done / total) * 100) : 0;
               return (
                 <div
@@ -359,20 +353,16 @@ export const StudentDashboard = ({ onOpenLesson }) => {
                     </div>
                     <div className="mt-1.5 h-1.5 w-full max-w-[260px] rounded-full bg-gray-200 overflow-hidden">
                       <div
-                        className={`h-full rounded-full ${finished ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                        className="h-full rounded-full bg-blue-500"
                         style={{ width: `${percent}%` }}
                       />
                     </div>
                   </div>
                   <button
                     onClick={() => setActiveHomework(h)}
-                    className={`shrink-0 px-4 py-2 rounded-xl text-sm font-bold cursor-pointer ${
-                      finished
-                        ? 'bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50'
-                        : 'bg-blue-600 hover:bg-blue-700 text-white'
-                    }`}
+                    className="shrink-0 px-4 py-2 rounded-xl text-sm font-bold cursor-pointer bg-blue-600 hover:bg-blue-700 text-white"
                   >
-                    {finished ? '✓ Посмотреть' : done > 0 ? 'Продолжить' : 'Решать'}
+                    {done > 0 ? 'Продолжить' : 'Решать'}
                   </button>
                 </div>
               );
