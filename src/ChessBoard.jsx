@@ -3351,10 +3351,11 @@ export const ChessBoardRoom = ({ isTeacher = true, isObserver = false, lesson })
   if (!lesson) return <div className="p-8 text-center text-gray-500">Урок не выбран</div>;
   return (
     <div className="min-h-[calc(100vh-7rem)] bg-slate-100">
-      {isTeacher && isMaterialsOpen && (
+            {isTeacher && isMaterialsOpen && (
         <MaterialsLibrary
           onClose={() => setIsMaterialsOpen(false)}
           onOpenPosition={openMaterialPosition}
+          lessonId={lesson?.id} 
         />
       )}
       {pendingPromotion && (

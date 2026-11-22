@@ -8,7 +8,7 @@ const CACHE_TTL_MS = 60 * 60 * 1000; // 1 час
 
 const POS_KEY_PREFIX = 'beechess_materials_pos_v1';
 
-// Читаем userId синхронно из кэша роли, который уже пишет App.jsx
+// Читаем userId синхронно из кэша роли
 const getCachedUserId = () => {
   try {
     const raw = localStorage.getItem('beechess_role_cache');
@@ -20,10 +20,13 @@ const getCachedUserId = () => {
   }
 };
 
-const readSavedPosition = (userId) => {
+// НОВОЕ: принимает lessonId
+const readSavedPosition = (userId, lessonId) => {
   if (!userId) return null;
   try {
-    const raw = localStorage.getItem(`${POS_KEY_PREFIX}_${userId}`);
+    // Если lessonId нет, используем global (на случай вызова вне урока)
+    const key = `${POS_KEY_PREFIX}_${userId}_${lessonId || 'global'}`;
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
@@ -33,10 +36,11 @@ const readSavedPosition = (userId) => {
   }
 };
 
-const writeSavedPosition = (userId, pos) => {
+const writeSavedPosition = (userId, lessonId, pos) => {
   if (!userId) return;
   try {
-    localStorage.setItem(`${POS_KEY_PREFIX}_${userId}`, JSON.stringify(pos));
+    const key = `${POS_KEY_PREFIX}_${userId}_${lessonId || 'global'}`;
+    localStorage.setItem(key, JSON.stringify(pos));
   } catch {
     // localStorage может быть переполнен — игнорируем
   }
@@ -101,15 +105,17 @@ const PositionPreview = ({ fen }) => {
   );
 };
 
-export const MaterialsLibrary = ({ onClose, onOpenPosition }) => {
-  // СИНХРОННАЯ инициализация — позиция подставляется до первого рендера
+// НОВОЕ: принимает lessonId в пропсах
+export const MaterialsLibrary = ({ onClose, onOpenPosition, lessonId }) => {
   const cachedUserId = getCachedUserId();
-  const initialPos = readSavedPosition(cachedUserId);
+  // Восстанавливаем позицию именно для текущего lessonId
+  const initialPos = readSavedPosition(cachedUserId, lessonId);
 
   const [materials, setMaterials] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [userId, setUserId] = useState(cachedUserId);
+  
   const [selectedModule, setSelectedModule] = useState(
     initialPos?.module || '1000-1300'
   );
@@ -119,10 +125,11 @@ export const MaterialsLibrary = ({ onClose, onOpenPosition }) => {
   const [selectedTopicNumber, setSelectedTopicNumber] = useState(
     initialPos?.topicNumber ?? null
   );
+  
   const [search, setSearch] = useState('');
   const [revealedSolutions, setRevealedSolutions] = useState(() => new Set());
 
-  // Резерв: если userId не было в кэше — подтягиваем асинхронно (редко, при первом входе)
+  // Резерв: если userId не было в кэше
   useEffect(() => {
     if (userId) return undefined;
     let cancelled = false;
@@ -265,16 +272,16 @@ export const MaterialsLibrary = ({ onClose, onOpenPosition }) => {
 
   const activeTopic = topics.find((topic) => topic.topic_number === activeTopicNumber);
 
-  // Сохранение при каждом изменении позиции (после того, как материалы загрузились)
+  // Сохранение позиции при изменении (теперь с lessonId)
   useEffect(() => {
     if (!userId) return;
     if (!activeModule) return;
-    writeSavedPosition(userId, {
+    writeSavedPosition(userId, lessonId, {
       module: activeModule,
       section: activeSection,
       topicNumber: activeTopicNumber,
     });
-  }, [userId, activeModule, activeSection, activeTopicNumber]);
+  }, [userId, lessonId, activeModule, activeSection, activeTopicNumber]);
 
   const toggleSolution = (puzzleId) => {
     setRevealedSolutions((current) => {
