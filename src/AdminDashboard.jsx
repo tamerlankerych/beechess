@@ -1,4 +1,3 @@
-// src/AdminDashboard.jsx
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from './supabaseClient';
 
@@ -108,6 +107,7 @@ const UsersTab = ({ onObserveRoom }) => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
+  const [deletingUserId, setDeletingUserId] = useState(null);
 
   const [users, setUsers] = useState([]);
   const [totalUsers, setTotalUsers] = useState(0);
@@ -256,7 +256,9 @@ const UsersTab = ({ onObserveRoom }) => {
   };
 
   const handleDeleteUser = async (userId, userEmail) => {
+    if (deletingUserId === userId) return;
     if (!window.confirm(`Удалить пользователя ${userEmail} безвозвратно?`)) return;
+    setDeletingUserId(userId);
     setMessage(null);
     setError(null);
     try {
@@ -264,12 +266,14 @@ const UsersTab = ({ onObserveRoom }) => {
         target_user_id: userId,
       });
       if (deleteError) throw deleteError;
-      setUsers(users.filter((u) => u.id !== userId));
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
       setTotalUsers((t) => Math.max(0, t - 1));
       setMessage(`Пользователь ${userEmail} удалён из системы.`);
     } catch (err) {
       console.error('Ошибка удаления:', err);
       setError('Не удалось удалить: ' + err.message);
+    } finally {
+      setDeletingUserId(null);
     }
   };
 
@@ -381,7 +385,7 @@ const UsersTab = ({ onObserveRoom }) => {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
           <h3 className="text-lg font-bold text-gray-900">Пользователи системы</h3>
           <button
-            onClick={fetchUsers}
+            onClick={() => fetchUsers()}
             className="text-xs text-blue-600 hover:underline cursor-pointer font-medium"
           >
             Обновить список
@@ -438,10 +442,11 @@ const UsersTab = ({ onObserveRoom }) => {
                       <td className="py-3 px-3 text-right">
                         {u.role !== 'admin' && (
                           <button
+                            disabled={deletingUserId === u.id}
                             onClick={() => handleDeleteUser(u.id, u.email)}
-                            className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 font-medium rounded transition cursor-pointer"
+                            className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 font-medium rounded transition cursor-pointer disabled:opacity-40"
                           >
-                            Удалить
+                            {deletingUserId === u.id ? 'Удаление...' : 'Удалить'}
                           </button>
                         )}
                       </td>
