@@ -120,7 +120,6 @@ const TeacherSalaryTab = ({ userId }) => {
       const fromIso = new Date(dateFrom + 'T00:00:00').toISOString();
       const toIso = new Date(dateTo + 'T23:59:59').toISOString();
 
-      // 1. Получаем базовые начисления
       const { data: earningsData, error: earnErr } = await supabase
         .from('teacher_earnings')
         .select('*')
@@ -135,7 +134,6 @@ const TeacherSalaryTab = ({ userId }) => {
         return;
       }
 
-      // 2. Подтягиваем данные об уроках (время, группы, ученики)
       const lessonIds = [...new Set(earningsData.map((e) => e.lesson_id))];
       const { data: lessonsData, error: lesErr } = await supabase
         .from('crm_lessons')
@@ -146,7 +144,6 @@ const TeacherSalaryTab = ({ userId }) => {
 
       const lessonsMap = Object.fromEntries((lessonsData || []).map((l) => [l.id, l]));
 
-      // 3. Подтягиваем названия групп
       const groupIds = [...new Set((lessonsData || []).map((l) => l.group_id).filter(Boolean))];
       let groupsMap = {};
       if (groupIds.length > 0) {
@@ -157,7 +154,6 @@ const TeacherSalaryTab = ({ userId }) => {
         groupsMap = Object.fromEntries((groupsData || []).map((g) => [g.id, g.name]));
       }
 
-      // 4. Подтягиваем имена учеников (для индивидуальных)
       const studentIds = [
         ...new Set(
           (lessonsData || [])
@@ -176,7 +172,6 @@ const TeacherSalaryTab = ({ userId }) => {
         );
       }
 
-      // 5. Собираем всё вместе
       const enrichedEarnings = earningsData.map((e) => {
         const lesson = lessonsMap[e.lesson_id] || {};
         let who = '—';
@@ -1053,6 +1048,12 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
   const canStartLesson = (lesson) => lesson.status === 'scheduled';
 
   const markLessonDone = async (lesson, attendance) => {
+    // ЗАЩИТА ОТ ДВОЙНОГО СПИСАНИЯ
+    if (lesson.status === 'done') {
+      alert('Этот урок уже проведён. Повторное списание заблокировано.');
+      return;
+    }
+
     try {
       const participants = getLiveParticipants(lesson);
 
@@ -1093,12 +1094,17 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
       if (error) throw error;
 
       for (const sid of attendees) {
-        await supabase.rpc('adjust_subscription', {
-          p_student_id: sid,
-          p_delta: -1,
-          p_reason: `Посещение урока ${new Date(lesson.starts_at).toLocaleDateString('ru-RU')}`,
-          p_lesson_id: lesson.id,
-        });
+        try {
+          await supabase.rpc('adjust_subscription', {
+            p_student_id: sid,
+            p_delta: -1,
+            p_reason: `Посещение урока ${new Date(lesson.starts_at).toLocaleDateString('ru-RU')}`,
+            p_lesson_id: lesson.id,
+          });
+        } catch (rpcErr) {
+          // Если сработает уникальный индекс базы (защита от дублей), мы просто пропустим этого ученика
+          console.warn(`Защита: занятие для ${sid} уже было списано за этот урок.`, rpcErr);
+        }
       }
 
       try {
@@ -1419,6 +1425,8 @@ const LessonDetailsModal = ({
   onMarkCancelled,
 }) => {
   const [attendance, setAttendance] = useState(() => ({ ...(lesson.attendance || {}) }));
+  const [isMarking, setIsMarking] = useState(false); // НОВОЕ: защита от дабл-клика
+
   const studentMap = useMemo(() => {
     const m = {};
     students.forEach((s) => (m[s.id] = s));
@@ -1587,10 +1595,19 @@ const LessonDetailsModal = ({
 
           {canMark && (
             <button
-              onClick={() => onMarkDone?.(attendance)}
-              className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm cursor-pointer"
+              onClick={async () => {
+                if (isMarking) return;
+                setIsMarking(true);
+                try {
+                  await onMarkDone?.(attendance);
+                } finally {
+                  setIsMarking(false);
+                }
+              }}
+              disabled={isMarking}
+              className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              ✓ Провести урок (списать занятие)
+              {isMarking ? '⏳ Списание...' : '✓ Провести урок (списать занятие)'}
             </button>
           )}
 
@@ -1706,7 +1723,6 @@ const LessonEditor = ({
   const [startHour, setStartHour] = useState(baseDate.getHours());
   const [startMinute, setStartMinute] = useState(0);
   
-  // НОВОЕ: вместо endHour/endMinute храним длительность
   const [durationMin, setDurationMin] = useState(45); 
 
   const [recurringDays, setRecurringDays] = useState([]);
@@ -1718,26 +1734,22 @@ const LessonEditor = ({
   const isGroupMode = attendeeMode === 'group' && !!selectedGroupId;
   const isGroup = isGroupMode || selectedStudentIds.length > 1;
 
-  // Вычисляем время окончания для отображения
   const totalEndMins = startHour * 60 + startMinute + durationMin;
   const calcEndHour = Math.floor(totalEndMins / 60) % 24;
   const calcEndMinute = totalEndMins % 60;
 
-  // ЛОГИКА АВТОМАТИЧЕСКОЙ ДЛИТЕЛЬНОСТИ
   useEffect(() => {
     if (attendeeMode === 'individual') {
-      // Для инд. можно выбрать 30 или 45 (оставляем текущее значение)
     } else if (attendeeMode === 'group' && selectedGroupId) {
       const grp = groups.find((g) => g.id === selectedGroupId);
       const memberCount = grp?.memberIds?.length || 0;
       
       if (memberCount === 1) {
-        setDurationMin(30); // В группе 1 чел -> 30 минут
+        setDurationMin(30); 
       } else {
-        setDurationMin(45); // В группе 2+ чел -> 45 минут
+        setDurationMin(45); 
       }
     } else if (attendeeMode === 'custom') {
-      // Если свой состав и выбрано 1 человек -> 30, если больше -> 45
       if (selectedStudentIds.length <= 1) {
         setDurationMin(30);
       } else {
@@ -2264,7 +2276,6 @@ const LessonEditor = ({
           )}
         </div>
 
-        {/* БЛОК ВРЕМЕНИ И ДЛИТЕЛЬНОСТИ */}
         <div className="grid grid-cols-2 gap-3 mb-4 items-start">
           <div>
             <TimePicker
