@@ -1,4 +1,3 @@
-// src/TeacherDashboard.jsx
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from './supabaseClient';
 import { fetchMyStudentIds } from './studentScope';
@@ -361,7 +360,7 @@ const StudentsTab = ({ userId, onOpenRoom }) => {
         return;
       }
 
-      const [{ data: studentsData, error: sErr }, { data: subsData }] =
+      const [{ data: studentsData, error: sErr }, { data: subsData, error: subsErr }] =
         await Promise.all([
           supabase
             .from('profiles')
@@ -374,6 +373,7 @@ const StudentsTab = ({ userId, onOpenRoom }) => {
             .in('student_id', ids),
         ]);
       if (sErr) throw sErr;
+      if (subsErr) throw subsErr;
 
       setStudents(studentsData || []);
       const map = {};
@@ -1054,64 +1054,14 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
     }
 
     try {
-      const participants = getLiveParticipants(lesson);
-
-      const hasTestStudent = participants.some((sid) => {
-        const student = students.find((s) => s.id === sid);
-        return student && /^test\d*@/i.test(student.email.trim());
+      const { error } = await supabase.rpc('complete_lesson', {
+        p_lesson_id: lesson.id,
+        p_attendance: attendance || {},
       });
 
-      if (hasTestStudent) {
-        alert('❌ Ошибка: В этом уроке есть тестовый ученик (email начинается на test).\nПроведение урока заблокировано.');
+      if (error) {
+        alert('❌ ' + error.message);
         return;
-      }
-
-      const attendees = participants.filter((sid) => attendance[sid] !== false);
-
-      if (attendees.length === 0) {
-        alert('❌ Ошибка: Вы никого не отметили как пришедшего.\n\nЕсли урок не состоялся, закройте это окно и нажмите кнопку "⊘ Не проведён (не списывать)".');
-        return;
-      }
-
-      for (const sid of attendees) {
-        const balance = subs[sid] ?? 0;
-        if (balance <= 0) {
-          const s = students.find((st) => st.id === sid);
-          alert(`❌ Ошибка: У ученика ${s?.name || s?.email || ''} нулевой или отрицательный баланс (${balance}).\n\nЧтобы провести урок, снимите с него галочку в списке "Кто пришёл".\n\nЕсли ученик должен оплатить позже, проведите урок без него, а затем попросите администратора добавить абонемент.`);
-          return; 
-        }
-      }
-
-      const { error } = await supabase
-        .from('crm_lessons')
-        .update({
-          status: 'done',
-          attendance,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', lesson.id);
-      if (error) throw error;
-
-      for (const sid of attendees) {
-        try {
-          await supabase.rpc('adjust_subscription', {
-            p_student_id: sid,
-            p_delta: -1,
-            p_reason: `Посещение урока ${new Date(lesson.starts_at).toLocaleDateString('ru-RU')}`,
-            p_lesson_id: lesson.id,
-          });
-        } catch (rpcErr) {
-          console.warn(`Защита: занятие для ${sid} уже было списано за этот урок.`, rpcErr);
-        }
-      }
-
-      try {
-        await supabase.rpc('add_teacher_earning', {
-          p_lesson_id: lesson.id,
-          p_attendees_count: attendees.length,
-        });
-      } catch (err) {
-        console.error('Ошибка начисления ЗП:', err);
       }
 
       setDetailsLesson(null);
@@ -1177,7 +1127,7 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
           .eq('recurring_group_id', lesson.recurring_group_id)
           .gte('starts_at', lesson.starts_at);
       }
-      
+
       setDetailsLesson(null);
       await fetchAll();
     } catch (err) {
@@ -1327,13 +1277,13 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
           onStart={() => {
             onStartCrmRoom?.(detailsLesson);
           }}
-          onRevert={() => {
+          onRevert={async () => {
             if (
               window.confirm(
                 'Отменить проведение урока?\n\n• Абонемент ученикам вернётся (+1)\n• Зарплата за урок будет снята'
               )
             ) {
-              revertLesson(detailsLesson);
+              await revertLesson(detailsLesson);
             }
           }}
           onMarkDone={(attendance) => markLessonDone(detailsLesson, attendance)}
@@ -1363,7 +1313,7 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
                 ? 'Этот урок является частью постоянной серии. Что именно вы хотите удалить?'
                 : 'Вы уверены, что хотите удалить этот урок?'}
             </p>
-            
+
             <div className="space-y-2">
               {deletingLesson.recurring_group_id ? (
                 <>
@@ -1388,7 +1338,7 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
                   Удалить урок
                 </button>
               )}
-              
+
               <button
                 onClick={() => setDeletingLesson(null)}
                 className="w-full py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 font-semibold rounded-xl text-sm transition cursor-pointer mt-2"
@@ -1424,7 +1374,7 @@ const LessonDetailsModal = ({
   onMarkCancelled,
 }) => {
   const [attendance, setAttendance] = useState(() => ({ ...(lesson.attendance || {}) }));
-  
+
   // Защита от дабл-кликов для всех кнопок
   const [isMarking, setIsMarking] = useState(false);
   const [isReverting, setIsReverting] = useState(false);
@@ -1753,8 +1703,8 @@ const LessonEditor = ({
   const [startDate, setStartDate] = useState(dateToInputValue(baseDate));
   const [startHour, setStartHour] = useState(baseDate.getHours());
   const [startMinute, setStartMinute] = useState(0);
-  
-  const [durationMin, setDurationMin] = useState(45); 
+
+  const [durationMin, setDurationMin] = useState(45);
 
   const [recurringDays, setRecurringDays] = useState([]);
   const [recurringWeeks, setRecurringWeeks] = useState(8);
@@ -1774,11 +1724,11 @@ const LessonEditor = ({
     } else if (attendeeMode === 'group' && selectedGroupId) {
       const grp = groups.find((g) => g.id === selectedGroupId);
       const memberCount = grp?.memberIds?.length || 0;
-      
+
       if (memberCount === 1) {
-        setDurationMin(30); 
+        setDurationMin(30);
       } else {
-        setDurationMin(45); 
+        setDurationMin(45);
       }
     } else if (attendeeMode === 'custom') {
       if (selectedStudentIds.length <= 1) {
@@ -2320,34 +2270,34 @@ const LessonEditor = ({
             />
           </div>
           <div>
-             <label className="block text-xs font-bold text-gray-700 mb-1.5">Окончание</label>
-             <div className="w-full px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-lg text-sm font-semibold text-slate-700">
-                {pad2(calcEndHour)}:{pad2(calcEndMinute)}
-             </div>
+            <label className="block text-xs font-bold text-gray-700 mb-1.5">Окончание</label>
+            <div className="w-full px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-lg text-sm font-semibold text-slate-700">
+              {pad2(calcEndHour)}:{pad2(calcEndMinute)}
+            </div>
           </div>
         </div>
 
         {attendeeMode === 'individual' ? (
           <div className="mb-4">
-             <label className="block text-xs font-bold text-gray-700 mb-1.5">Длительность урока</label>
-             <div className="flex gap-2">
-                <button
-                   onClick={() => setDurationMin(30)}
-                   className={`flex-1 py-2 rounded-lg text-sm font-bold border transition ${durationMin === 30 ? 'bg-blue-50 border-blue-600 text-blue-700' : 'bg-white border-slate-200 text-gray-600 hover:bg-slate-50'}`}
-                >
-                   30 минут
-                </button>
-                <button
-                   onClick={() => setDurationMin(45)}
-                   className={`flex-1 py-2 rounded-lg text-sm font-bold border transition ${durationMin === 45 ? 'bg-blue-50 border-blue-600 text-blue-700' : 'bg-white border-slate-200 text-gray-600 hover:bg-slate-50'}`}
-                >
-                   45 минут
-                </button>
-             </div>
+            <label className="block text-xs font-bold text-gray-700 mb-1.5">Длительность урока</label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setDurationMin(30)}
+                className={`flex-1 py-2 rounded-lg text-sm font-bold border transition ${durationMin === 30 ? 'bg-blue-50 border-blue-600 text-blue-700' : 'bg-white border-slate-200 text-gray-600 hover:bg-slate-50'}`}
+              >
+                30 минут
+              </button>
+              <button
+                onClick={() => setDurationMin(45)}
+                className={`flex-1 py-2 rounded-lg text-sm font-bold border transition ${durationMin === 45 ? 'bg-blue-50 border-blue-600 text-blue-700' : 'bg-white border-slate-200 text-gray-600 hover:bg-slate-50'}`}
+              >
+                45 минут
+              </button>
+            </div>
           </div>
         ) : (
           <div className="mb-4 p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700 font-medium">
-             Длительность автоматически зафиксирована: <strong>{durationMin} минут</strong> (исходя из количества учеников).
+            Длительность автоматически зафиксирована: <strong>{durationMin} минут</strong> (исходя из количества учеников).
           </div>
         )}
 
