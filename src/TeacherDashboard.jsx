@@ -1048,7 +1048,6 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
   const canStartLesson = (lesson) => lesson.status === 'scheduled';
 
   const markLessonDone = async (lesson, attendance) => {
-    // ЗАЩИТА ОТ ДВОЙНОГО СПИСАНИЯ
     if (lesson.status === 'done') {
       alert('Этот урок уже проведён. Повторное списание заблокировано.');
       return;
@@ -1102,7 +1101,6 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
             p_lesson_id: lesson.id,
           });
         } catch (rpcErr) {
-          // Если сработает уникальный индекс базы (защита от дублей), мы просто пропустим этого ученика
           console.warn(`Защита: занятие для ${sid} уже было списано за этот урок.`, rpcErr);
         }
       }
@@ -1139,6 +1137,7 @@ const ScheduleTab = ({ userId, onStartCrmRoom }) => {
   };
 
   const revertLesson = async (lesson) => {
+    if (lesson.status !== 'done') return;
     try {
       const { error } = await supabase.rpc('revert_lesson_to_scheduled', {
         p_lesson_id: lesson.id,
@@ -1425,7 +1424,12 @@ const LessonDetailsModal = ({
   onMarkCancelled,
 }) => {
   const [attendance, setAttendance] = useState(() => ({ ...(lesson.attendance || {}) }));
-  const [isMarking, setIsMarking] = useState(false); // НОВОЕ: защита от дабл-клика
+  
+  // Защита от дабл-кликов для всех кнопок
+  const [isMarking, setIsMarking] = useState(false);
+  const [isReverting, setIsReverting] = useState(false);
+  const [isSkipping, setIsSkipping] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   const studentMap = useMemo(() => {
     const m = {};
@@ -1577,10 +1581,19 @@ const LessonDetailsModal = ({
         <div className="space-y-2">
           {canRevert && (
             <button
-              onClick={onRevert}
-              className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-700 font-bold rounded-xl text-sm cursor-pointer border border-red-200"
+              onClick={async () => {
+                if (isReverting) return;
+                setIsReverting(true);
+                try {
+                  await onRevert?.();
+                } finally {
+                  setIsReverting(false);
+                }
+              }}
+              disabled={isReverting}
+              className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-700 font-bold rounded-xl text-sm cursor-pointer border border-red-200 disabled:opacity-50"
             >
-              ↩️ Отменить проведение
+              {isReverting ? '⏳ Отмена...' : '↩️ Отменить проведение'}
             </button>
           )}
 
@@ -1613,19 +1626,37 @@ const LessonDetailsModal = ({
 
           {canMark && (
             <button
-              onClick={() => onMarkSkipped?.()}
-              className="w-full py-2.5 bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold rounded-xl text-sm cursor-pointer"
+              onClick={async () => {
+                if (isSkipping) return;
+                setIsSkipping(true);
+                try {
+                  await onMarkSkipped?.();
+                } finally {
+                  setIsSkipping(false);
+                }
+              }}
+              disabled={isSkipping}
+              className="w-full py-2.5 bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold rounded-xl text-sm cursor-pointer disabled:opacity-50"
             >
-              ⊘ Не проведён (не списывать)
+              {isSkipping ? '⏳ Сохранение...' : '⊘ Не проведён (не списывать)'}
             </button>
           )}
 
           {canMark && !isPast && (
             <button
-              onClick={onMarkCancelled}
-              className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm cursor-pointer"
+              onClick={async () => {
+                if (isCancelling) return;
+                setIsCancelling(true);
+                try {
+                  await onMarkCancelled?.();
+                } finally {
+                  setIsCancelling(false);
+                }
+              }}
+              disabled={isCancelling}
+              className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm cursor-pointer disabled:opacity-50"
             >
-              ✕ Отменить урок
+              {isCancelling ? '⏳ Отмена...' : '✕ Отменить урок'}
             </button>
           )}
 
